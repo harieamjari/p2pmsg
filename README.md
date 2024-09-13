@@ -1,6 +1,6 @@
 # p2pmsg
 
-A peer to peer messaging app on devices on same LAN project.
+A peer to peer messaging app on devices on the same LAN.
 
 ## Getting Started
 
