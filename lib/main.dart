@@ -1,25 +1,30 @@
+/* main.dart - p2pmsg entry point
+ *
+ * Built with hopes, dreams and lots and lots of
+ * demo code.
+ */
+
 import 'package:flutter/material.dart';
-import 'session.dart';
 import 'setup.dart';
 
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
+class P2PApp extends StatelessWidget {
+  const P2PApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'P2P over PGP messaging app',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF2274A5)),
         useMaterial3: true,
       ),
-      home: const SessionsPage(title: 'Sessions'),
+      home: SetupPage(),
     );
   }
 }
 
-void main() {
-  runApp(const MyApp());
+
+
+Future<void> main() async {
+  runApp(P2PApp());
 }

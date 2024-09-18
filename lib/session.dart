@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:openpgp/openpgp.dart';
+import 'package:bonsoir/bonsoir.dart';
+import 'package:grpc/grpc.dart';
 import 'package:uuid/uuid.dart';
 
 class Session { 
@@ -7,26 +10,20 @@ class Session {
 }
 
 class NewSessionPage extends StatelessWidget {
-  final String title;
-  const NewSessionPage({super.key, required this.title});
+  const NewSessionPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () {
+      onWillPop: () async {
         Navigator.pop(context, null);
-        return Future.value(null);
+        return Future.value(true);
       },
       child: 
         Scaffold(
           appBar: AppBar(
-            // TRY THIS: Try changing the color here to a specific color (to
-            // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-            // change color while the other colors stay the same.
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-            // Here we take the value from the SessionsPage object that was created by
-            // the App.build method, and use it to set our appbar title.
-            title: Text(title),
+            title: const Text('New session', style: TextStyle(color: Colors.white)),
           ),
           body: Center(
             child: ElevatedButton(
@@ -42,8 +39,16 @@ class NewSessionPage extends StatelessWidget {
 }
 
 class SessionsPage extends StatefulWidget {
-  final String title;
-  const SessionsPage({super.key, required this.title});
+  final KeyPair keyPair;
+  final BonsoirService service;
+  final BonsoirBroadcast broadcast;
+
+  const SessionsPage({
+    super.key,
+    required this.keyPair,
+    required this.service,
+    required this.broadcast
+  });
 
   @override
   State<SessionsPage> createState() => _SessionsPageState();
@@ -51,8 +56,6 @@ class SessionsPage extends StatefulWidget {
 
 class _SessionsPageState extends State<SessionsPage> {
   List<Session> sessions = <Session>[];
-  int nbSessions = 0;
-
   Widget listSessionBuilder(BuildContext context, int index) {
     return Card(
       child: ListTile(
@@ -62,57 +65,51 @@ class _SessionsPageState extends State<SessionsPage> {
     );
   }
 
-  void newSession(session) {
+  _bodyBuilder(context) {
+    if (sessions.length == 0) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text('No sessions'),
+          ],
+        ),
+      ); // return
+    }
+    return ListView.builder(
+      itemCount: sessions.length,
+      itemBuilder: listSessionBuilder,
+    );
+  }
+
+  _newSession(session) {
     setState(() {
       sessions.add(session);
-      nbSessions++;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the SessionsPage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Sessions', style: TextStyle(color: Colors.white)),
+        centerTitle: true,
       ),
-      body: () {
-        if (nbSessions == 0) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                const Text(
-                  'No sessions',
-                ),
-              ],
-            ),
-          ); // return
-        }
-        return ListView.builder(
-          itemCount: sessions.length,
-          itemBuilder: listSessionBuilder,
-        );
-      }(),
+      body: _bodyBuilder(context),
       floatingActionButton: FloatingActionButton(
         //onPressed: newSession,
         onPressed: () async {
           final session = await Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const NewSessionPage(title: 'New session')),
+            MaterialPageRoute(builder: (context) => const NewSessionPage()),
           );
           if (session != null) {
-            newSession(session);
+            _newSession(session);
           }
         },
         tooltip: 'New session',
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add, color: Colors.white),
       ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
