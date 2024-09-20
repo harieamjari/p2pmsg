@@ -3,6 +3,7 @@ import 'package:openpgp/openpgp.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:grpc/grpc.dart';
 import 'package:uuid/uuid.dart';
+import 'message.dart';
 
 class Session { 
   final uuid;
@@ -49,13 +50,14 @@ class SessionsPage extends StatefulWidget {
     required this.service,
     required this.broadcast
   });
-
+    
   @override
   State<SessionsPage> createState() => _SessionsPageState();
 }
 
 class _SessionsPageState extends State<SessionsPage> {
   List<Session> sessions = <Session>[];
+  bool isBroadcast = false;
   Widget listSessionBuilder(BuildContext context, int index) {
     return Card(
       child: ListTile(
@@ -95,6 +97,24 @@ class _SessionsPageState extends State<SessionsPage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text('Sessions', style: TextStyle(color: Colors.white)),
         centerTitle: true,
+        actions: [
+          Switch(
+            value: isBroadcast,
+            activeColor: Colors.green,
+            onChanged: (bool value)  {
+              setState(
+                () async {
+                  isBroadcast = value;
+                  if (isBroadcast) {
+                    await widget.broadcast.ready;
+                    await widget.broadcast.start();
+                  } else 
+                    await widget.broadcast.stop();
+                }
+              );
+            },
+          ), // switch
+        ],
       ),
       body: _bodyBuilder(context),
       floatingActionButton: FloatingActionButton(

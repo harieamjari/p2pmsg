@@ -34,12 +34,12 @@ class _SetupPageState extends State<SetupPage> {
     keyPair.then((key) async {
       PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(key.publicKey);
       BonsoirService service = BonsoirService(
-        name: metadata.keyId,
+        name: metadata.fingerprint,
         type: '_p2pmsg._tcp',
-        port: 2743
+        port: 6573
       );
       BonsoirBroadcast broadcast = BonsoirBroadcast(service: service);
-      await broadcast.ready;
+      //await broadcast.ready;
       Navigator.pushReplacement<void, void>(
         context,
           MaterialPageRoute<void>(

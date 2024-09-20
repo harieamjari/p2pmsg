@@ -35,6 +35,7 @@ dependencies:
   openpgp: ^3.8.3
   grpc: ^4.0.1
   bonsoir: ^5.1.10
+  protobuf: ^3.1.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
