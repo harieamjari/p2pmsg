@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter/material.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
+import 'package:uuid/uuid.dart';
 import 'session.dart';
 
 
@@ -16,19 +17,19 @@ class SetupPage extends StatefulWidget {
 }
 
 class _SetupPageState extends State<SetupPage> {
-  var name = '';
-  var email = '';
-  var password = '';
-  var _isLoading = false;
+  String _name = '';
+  String _email = '';
+  String _password = '';
+  bool _isLoading = false;
 
   void _onSubmit() {
     setState(() => _isLoading = true);
     var keyOptions = KeyOptions()..rsaBits = 2048;
     final keyPair = OpenPGP.generate(
       options: Options()
-        ..name = name
-        ..email = email
-        ..passphrase = password
+        ..name = _name
+        ..email = _email
+        ..passphrase = _password
         ..keyOptions = keyOptions
     );
     keyPair.then((key) async {
@@ -36,14 +37,20 @@ class _SetupPageState extends State<SetupPage> {
       BonsoirService service = BonsoirService(
         name: metadata.fingerprint,
         type: '_p2pmsg._tcp',
-        port: 6573
+        port: 6573,
+        attributes: {
+          'userName': _name,
+          'userEmail': _email,
+          'uuid': Uuid().v1(),
+        }
       );
-      BonsoirBroadcast broadcast = BonsoirBroadcast(service: service);
-      //await broadcast.ready;
       Navigator.pushReplacement<void, void>(
         context,
           MaterialPageRoute<void>(
-            builder: (context) => SessionsPage(keyPair: key, service: service, broadcast: broadcast),
+            builder: (context) => SessionsPage(
+              keyPair: key,
+              pkeyMetadata: metadata,
+              service: service),
           ),
       );
       setState(() => _isLoading = false);
@@ -67,8 +74,8 @@ class _SetupPageState extends State<SetupPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TextField(
-          onSubmitted: (String value) {
-            name = value; 
+          onChanged: (String value) {
+            _name = value; 
           },
           decoration: InputDecoration(
               hintText: "Name",
@@ -81,8 +88,8 @@ class _SetupPageState extends State<SetupPage> {
               prefixIcon: const Icon(Icons.person)),
         ), const SizedBox(height: 10),
         TextField(
-          onSubmitted: (String value) {
-            email = value; 
+          onChanged: (String value) {
+            _email = value; 
           },
           decoration: InputDecoration(
               hintText: "Email",
@@ -95,8 +102,8 @@ class _SetupPageState extends State<SetupPage> {
               prefixIcon: const Icon(Icons.email)),
         ), const SizedBox(height: 10),
         TextField(
-          onSubmitted: (String value) {
-            password = value; 
+          onChanged: (String value) {
+            _password = value; 
           },
           obscureText: true,
           decoration: InputDecoration(
