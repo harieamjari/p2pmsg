@@ -22,6 +22,17 @@ class _SetupPageState extends State<SetupPage> {
   String _password = '';
   bool _isLoading = false;
 
+  String _fingerprintToHex(String str) {
+    String builder = '';
+    List<String> list = str.split(':');
+    for (var i = 0; i < list.length; i++) {
+      if (i > 1 && (i%2) == 0)
+        builder += ' ';
+      builder += int.parse(list[i]).toRadixString(16).padLeft(2, '0');
+    }
+    return builder;
+  }
+
   void _onSubmit() {
     setState(() => _isLoading = true);
     var keyOptions = KeyOptions()..rsaBits = 2048;
@@ -35,12 +46,19 @@ class _SetupPageState extends State<SetupPage> {
     keyPair.then((key) async {
       PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(key.publicKey);
       BonsoirService service = BonsoirService(
-        name: metadata.fingerprint,
+        name: _fingerprintToHex(metadata.fingerprint),
         type: '_p2pmsg._tcp',
         port: 6573,
         attributes: {
           'userName': _name,
           'userEmail': _email,
+          'algorithm': metadata.algorithm,
+          'keyId': metadata.keyId,
+          'keyIdShort': metadata.keyIdShort,
+          'keyIdNumeric': metadata.keyIdShort,
+          'isSubKey': (metadata.isSubKey ? 'true' : 'false'),
+          'canSign': (metadata.canSign ? 'true' : 'false'),
+          'canEncrypt': (metadata.canEncrypt ? 'true' : 'false'),
           'uuid': Uuid().v1(),
         }
       );

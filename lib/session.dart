@@ -23,17 +23,25 @@ class _NewSessionPageState extends State<NewSessionPage> {
   final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp'); 
   List<BonsoirService> _services = <BonsoirService>[];
 
+  _onTap (String name) {
+
+  }
+
   Widget _listServicesBuilder(BuildContext context, int index) {
     return Card(
       child: ListTile(
+        onTap: () => _onTap(_services[index].name),
         title: Text(
           (_services[index].attributes['userName'] ?? '') +
           ' <' + (_services[index].attributes['userEmail'] ?? '') + '>'
         ),
         subtitle: Text('fingerprint: ' + _services[index].name ?? ''),
+        leading: Icon(Icons.account_circle_rounded),
       ),
     );
   }
+
+
   _onBonsoirDiscoveryEvent(BonsoirDiscoveryEvent event) {
     switch (event.type) {
       case BonsoirDiscoveryEventType.discoveryServiceFound:
