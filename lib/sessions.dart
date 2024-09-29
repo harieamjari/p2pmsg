@@ -3,11 +3,17 @@ import 'package:openpgp/openpgp.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:grpc/grpc.dart';
 import 'package:uuid/uuid.dart';
+import 'session.dart';
+import 'p2pmsg.dart';
 import 'message.dart';
+
 
 class Session { 
   final uuid;
-  Session() : uuid = Uuid().v1();
+  final String name;
+  final String keyFingerprint;
+  
+  Session({required this.name, required this.keyFingerprint}) : uuid = Uuid().v1();
 }
 
 class NewSessionPage extends StatefulWidget {
@@ -23,14 +29,20 @@ class _NewSessionPageState extends State<NewSessionPage> {
   final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp'); 
   List<BonsoirService> _services = <BonsoirService>[];
 
-  _onTap (String name) {
 
+  List<Sessions> _newSessions = <Sessions>[];
+
+  _onTap (BonsoirService service) {
+    _newSessions.add(
+      name: service.attributes['userName'] ?? '',
+      keyFingerprint: service.name ?? '',
+    );
   }
 
   Widget _listServicesBuilder(BuildContext context, int index) {
     return Card(
       child: ListTile(
-        onTap: () => _onTap(_services[index].name),
+        onTap: () => _onTap(_services[index]),
         title: Text(
           (_services[index].attributes['userName'] ?? '') +
           ' <' + (_services[index].attributes['userEmail'] ?? '') + '>'
@@ -93,7 +105,11 @@ class _NewSessionPageState extends State<NewSessionPage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        Navigator.pop(context, null);
+        if (_newSessions.length == 0)
+          Navigator.pop(context, null);
+        else
+          Navigator.pop(context, _newSessions);
+
         return Future.value(true);
       },
       child: 
@@ -156,8 +172,8 @@ class _SessionsPageState extends State<SessionsPage> {
   Widget listSessionBuilder(BuildContext context, int index) {
     return Card(
       child: ListTile(
-        title: Text('${index}'),
-        subtitle: Text('${index} ' + sessions[index].uuid),
+        title: Text(sessions[index].name),
+        subtitle: Text('fingerprint: ' + sessions[index].keyFingerprint),
       ),
     );
   }
@@ -179,7 +195,7 @@ class _SessionsPageState extends State<SessionsPage> {
     );
   }
 
-  _newSession(session) {
+  _newSessions(session) {
     setState(() {
       sessions.add(session);
     });
@@ -247,15 +263,15 @@ class _SessionsPageState extends State<SessionsPage> {
       floatingActionButton: FloatingActionButton(
         //onPressed: newSession,
         onPressed: () async {
-          final session = await Navigator.push(
+          final List<Sessions>? sessions = await Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => NewSessionPage(
                 userFingerprint: widget.pkeyMetadata.fingerprint
               )
             ),
           );
-          if (session != null) {
-            _newSession(session);
+          if (sessions != null) {
+            _newSessions(sessions!);
           }
         },
         tooltip: 'New session',

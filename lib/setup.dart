@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:uuid/uuid.dart';
-import 'session.dart';
+import 'sessions.dart';
+import 'settings.dart';
 
 
 // Generate pgp keys for new users, else get password
@@ -46,9 +47,10 @@ class _SetupPageState extends State<SetupPage> {
     keyPair.then((key) async {
       PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(key.publicKey);
       BonsoirService service = BonsoirService(
-        name: _fingerprintToHex(metadata.fingerprint),
+        name: _fingerprintToHex(metadata.fingerprint) +
+             '-' + int.parse(DateTime.now().millisecondsSinceEpoch/1000).toRadixString(16),
         type: '_p2pmsg._tcp',
-        port: 6573,
+        port: P2PSettings.port,
         attributes: {
           'userName': _name,
           'userEmail': _email,
