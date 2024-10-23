@@ -37,11 +37,11 @@
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:uuid/uuid.dart';
-import 'utils.dart';
 import 'dart:typed_data';
-import 'dart:async';
-import 'dart:io';
 import 'utils.dart';
+import 'dart:async';
+import 'utils.dart';
+import 'dart:io';
 
 int _UnixEpoch() {
   return (DateTime.now().millisecondsSinceEpoch / 1000).toInt();
@@ -109,8 +109,12 @@ enum EndpointType {
 }
 
 class _P2PSocket {
-  final EndpointType endpointType;
   final Socket socket;
+  final KeyPair keyPair;
+  final EndpointType endpointType;
+  final String Function() getPass;
+
+
   String hostPkey = '';
   String hostFingerprint = '';
   final PublicKeyMetadata hostPkeyMeta;
@@ -119,7 +123,7 @@ class _P2PSocket {
   String endpointFingerprint = '';
   late PublicKeyMetadata endpointPkeyMeta;
 
-  bool hasHandshake = false;
+  bool msgSentBeforeAck = false;
 
   late StreamSubscription<Uint8List> streamSub;
 
@@ -127,12 +131,15 @@ class _P2PSocket {
   void Function(Socket)? onClose = null;
   List<int> _buf = <int>[];
   int _expectingLen = 0;
+  bool isAcked = false;
 
   void _onDone() {
     if (onClose != null) onClose!(socket);
+    if (msgSentBeforeAck) return;
     if (endpointPkey != '') {
       sink.add(EventClientDisconnect(
           timestamp: P2PUtils.UnixEpoch(), keyFingerprint: endpointFingerprint));
+      print('event Client Disconnect added');
     }
   }
 
@@ -159,8 +166,9 @@ class _P2PSocket {
       List.copyRange<int>(listSignature, 0, _buf, 0, signatureLen);
       _buf.removeRange(0, signatureLen);
 
-      sink.add(
-          EventMessageE(signature: listSignature, encrypted: listEncrypted, senderFingerprint: endpointFingerprint));
+      sink.add(EventMessageText(timestamp: P2PUtils.UnixEpoch(), senderFingerprint: endpointFingerprint, messageText: 'Hi harie'));
+//      sink.add(
+//          EventMessageE(signature: listSignature, encrypted: listEncrypted, senderFingerprint: endpointFingerprint));
 //      print('parsing successful');
 //      print('encrypted ${listEncrypted}');
 //      print('signature ${listSignature}');
@@ -175,7 +183,7 @@ class _P2PSocket {
 
   void _recvMessage(Uint8List data) {
     _buf.addAll(data);
-    // Wait until we have received  "P2PGH" + uint32 handshake message length
+    // Wait until we have received  "P2GH" + uint32 handshake message length
     if (_buf.length < _expectingLen) return;
     print('Receiving message');
 
@@ -187,6 +195,12 @@ class _P2PSocket {
       // H
       socket.destroy();
       print('invalid message header');
+      return;
+    }
+    if (endpointType == EndpointType.client && !isAcked) {
+      print('endpoint was trying to send message before ACKP');
+      msgSentBeforeAck = true;
+      socket.destroy();
       return;
     }
     _buf.removeRange(0, 4);
@@ -207,25 +221,23 @@ class _P2PSocket {
   // Primitive C-like parsing
   void _parseHandshake(Uint8List data) {
     try {
+    // FIXME: Make sure to drop client when they start pushing dangerously large data.
       // Maximum 16 Kib
-      if (_buf.length + data.length > _expectingLen) {
-        print('exceeded max message length ${_expectingLen}');
-        if (onClose != null) onClose!(socket);
-        socket.destroy();
-        return;
-      }
+//      if (_buf.length + data.length > _expectingLen) {
+//        print('exceeded max message length ${_expectingLen}');
+//        if (onClose != null) onClose!(socket);
+//        socket.destroy();
+//        return;
+//      }
       _buf.addAll(data);
       if (_buf.length < _expectingLen) return;
       print('parsing handshake');
-      if (hasHandshake) {
-        print('endpoint insane');
-        socket.destroy();
-        return;
-      }
+      BytesBuilder HandshakeBlob = BytesBuilder();
 
 
       // timestamp 64 bit (network order)
       int timestamp = _list2Uint64(_buf);
+      HandshakeBlob.add(P2PUtils.Uint64ToList(timestamp));
       _buf.removeRange(0, 8);
 
       // dstKeyFingerprint
@@ -233,7 +245,11 @@ class _P2PSocket {
       _buf.removeRange(0, 4);
       List<int> listKeyFingerprint = List<int>.filled(dstKeyFingerprintLen, 0);
       List.copyRange<int>(listKeyFingerprint, 0, _buf, 0, dstKeyFingerprintLen);
-      endpointFingerprint = String.fromCharCodes(listKeyFingerprint);
+      if (String.fromCharCodes(listKeyFingerprint) != hostFingerprint){
+        print('handshake dstFingerprint mismatch ${String.fromCharCodes(listKeyFingerprint)}');
+        socket.destroy();
+      };
+      HandshakeBlob.add(listKeyFingerprint);
       _buf.removeRange(0, dstKeyFingerprintLen);
 
       // Pkey
@@ -243,6 +259,8 @@ class _P2PSocket {
       List<int> listPkey = List<int>.filled(pkeyLen, 0);
       List.copyRange<int>(listPkey, 0, _buf, 0, pkeyLen);
       endpointPkey = String.fromCharCodes(listPkey);
+
+      HandshakeBlob.add(listPkey);
       _buf.removeRange(0, pkeyLen);
 
       // Signature
@@ -250,17 +268,37 @@ class _P2PSocket {
       _buf.removeRange(0, 4);
       List<int> listSignature = List<int>.filled(signatureLen, 0);
       List.copyRange<int>(listSignature, 0, _buf, 0, signatureLen);
-
       _buf.removeRange(0, signatureLen);
+
       print('parsing successful');
 
-      if (endpointType == EndpointType.client) _sendHandshake();
-      OpenPGP.getPublicKeyMetadata(endpointPkey).then((PublicKeyMetadata meta) {  
-        endpointPkeyMeta = meta;
-        endpointFingerprint = P2PUtils.fingerprintToHex(meta.fingerprint);
-        sink.add(
-            EventClientConnect(timestamp: timestamp, name: meta.identities[0].name,
-              keyFingerprint: endpointFingerprint, socket: socket));
+      OpenPGP.verifyBytes(String.fromCharCodes(listSignature), HandshakeBlob.toBytes(), endpointPkey).then((isValid){
+        if (!isValid) {
+          print('malformed signature');
+          socket.destroy();
+          return;
+        }
+        if (endpointType == EndpointType.client) _sendHandshake();
+        OpenPGP.getPublicKeyMetadata(endpointPkey).then((PublicKeyMetadata meta) {  
+          endpointPkeyMeta = meta;
+          endpointFingerprint = P2PUtils.fingerprintToHex(meta.fingerprint);
+          sink.add(
+              EventClientConnect(timestamp: timestamp, name: meta.identities[0].name,
+                keyFingerprint: endpointFingerprint, socket: socket));
+          print('event ClientConnect added');
+          if (endpointType == EndpointType.client && msgSentBeforeAck) {
+            sink.add(EventClientDisconnect(
+              timestamp: P2PUtils.UnixEpoch(), keyFingerprint: endpointFingerprint));
+            print('event ClientDisconnect added');
+            return;
+          }
+          // write ACKP to client
+          if (endpointType == EndpointType.client) {
+            socket.add(<int>[65, 67, 75, 80]);
+            socket.flush();
+            isAcked = true;
+          }
+        });
       });
     } catch (e) {
       print('parsing failure');
@@ -305,6 +343,23 @@ class _P2PSocket {
     return;
   }
 
+  void _waitACKP(Uint8List data) {
+    _buf.addAll(data);
+    // Wait until we have received  "ACKP"
+    if (_buf.length < 4) return;
+    if (!(_buf[0] == 65 && // A
+        _buf[1] == 67 && // C
+        _buf[2] == 75 && // K
+        _buf[3] == 80)) { // P
+      print('malformed ACKP');
+      socket.destroy();
+      return;
+    }
+    print('Recevied ACKP');
+
+    streamSub.onData(_doHandshake);
+    _doHandshake(Uint8List(0));
+  }
   _sendHandshake() async {
 //  4 bytes   |  The string "P2GP"
 //  4 bytes   | Whole message length
@@ -317,7 +372,15 @@ class _P2PSocket {
 //  .......   | PGP signature of the above first 6 fields
     // Send P2GP Message
     // Header
+    BytesBuilder HandshakeBlob = BytesBuilder();
+    HandshakeBlob.add(_Uint64ToList(_UnixEpoch()));
+    HandshakeBlob.add(P2PUtils.String2List(endpointFingerprint));
+    HandshakeBlob.add(P2PUtils.String2List(hostPkey));
+    String sig = await OpenPGP.signBytesToString(HandshakeBlob.toBytes(), keyPair.privateKey, getPass());
+
+    
     BytesBuilder b = BytesBuilder();
+
 
     b.add(_Uint64ToList(_UnixEpoch()));
 
@@ -327,8 +390,8 @@ class _P2PSocket {
     b.add(_Uint32ToList(hostPkey.length));
     b.add(Uint8List.fromList(hostPkey.codeUnits));
 
-    b.add(_Uint32ToList(0));
-    b.add(Uint8List.fromList(''.codeUnits));
+    b.add(_Uint32ToList(sig.length));
+    b.add(Uint8List.fromList(sig.codeUnits));
 
     socket.add(<int>[80, 50, 71, 80]);
     socket.add(_Uint32ToList(b.length));
@@ -352,23 +415,29 @@ class _P2PSocket {
 
   _P2PSocket.endpointClient(
       {required this.socket,
-      required this.hostPkey,
+      required this.keyPair,
       required this.hostPkeyMeta,
+      required this.getPass,
       required this.sink,
       this.onClose})
-      : endpointType = EndpointType.client {
+      : endpointType = EndpointType.client,
+        hostPkey = keyPair.publicKey {
+    hostFingerprint = P2PUtils.fingerprintToHex(hostPkeyMeta.fingerprint);
     streamSub = socket.listen(_doHandshake, onDone: _onDone);
   }
   _P2PSocket.endpointServer(
       {required this.socket,
-      required this.hostPkey,
+      required this.keyPair,
       required this.hostPkeyMeta,
       required this.endpointFingerprint,
+      required this.getPass,
       required this.sink,
       this.onClose})
-      : endpointType = EndpointType.server {
+      : endpointType = EndpointType.server,
+        hostPkey = keyPair.publicKey {
     _sendHandshake();
-    streamSub = socket.listen(_doHandshake, onDone: _onDone);
+    hostFingerprint = P2PUtils.fingerprintToHex(hostPkeyMeta.fingerprint);
+    streamSub = socket.listen(_waitACKP, onDone: _onDone);
   }
 //  _P2PSocket(
 //      {required this.serverPkey,
@@ -392,7 +461,16 @@ enum P2PBroadcastStatus {
 
 class P2PService {
   final int port;
+  // XXX: MUST BE IN A SECURE MEMORY!!
+  late KeyPair keyPair;
   late String serverPkey;
+  late String serverSkey;
+
+  String password = '';
+  String getPass() {return password;}
+
+  void Function() ?onDiscoveryState = null;
+
   late PublicKeyMetadata serverPkeyMeta;
   late BonsoirService _serverService;
   final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp');
@@ -405,7 +483,11 @@ class P2PService {
   BonsoirBroadcast? serverBroadcast = null;
   P2PBroadcastStatus broadcastStatus = P2PBroadcastStatus.stopped;
 
-  P2PService({this.port = 6573, required this.serverPkey}) :_streamController = StreamController() {
+  P2PService({this.port = 6573, required this.keyPair, required this.password})
+   :  _streamController = StreamController()
+    {
+    serverPkey = keyPair.publicKey;
+    serverSkey = keyPair.privateKey;
     events = _streamController.stream;
   }
 
@@ -434,8 +516,9 @@ class P2PService {
     print('Client connected');
     _clients.add(_P2PSocket.endpointClient(
       socket: client,
-      hostPkey: serverPkey,
+      keyPair: keyPair,
       hostPkeyMeta: serverPkeyMeta,
+      getPass: getPass,
       sink: _streamController.sink,
       onClose: _onClose,
     ));
@@ -449,9 +532,13 @@ class P2PService {
         if (event.service !=
             null /*&& event.service!.name != widget.userFingerprint*/)
           services.add(event.service!);
+        if (onDiscoveryState != null)
+          onDiscoveryState!();
       case BonsoirDiscoveryEventType.discoveryServiceLost:
         services
             .removeWhere((service) => service.name == event.service?.name);
+        if (onDiscoveryState != null)
+          onDiscoveryState!();
       default:
         ;
     }
@@ -494,8 +581,9 @@ class P2PService {
       print('Manually connected');
       _clients.add(_P2PSocket.endpointServer(
         socket: server,
-        hostPkey: serverPkey,
+        keyPair: keyPair,
         hostPkeyMeta: serverPkeyMeta,
+        getPass: getPass,
         sink: _streamController.sink,
         endpointFingerprint: keyFingerprint,
         onClose: _onClose,
@@ -569,6 +657,15 @@ class EventMessageE extends P2PMessage {
   }
 
   EventMessageE({required this.signature, required this.encrypted, required this.senderFingerprint});
+}
+
+// Messages of Text Media or Pictures are supposedly to be encrypted
+
+class EventMessageText extends P2PMessage {
+  final int timestamp;
+  final String senderFingerprint;
+  String messageText;
+  EventMessageText({required this.timestamp, required this.senderFingerprint, required this.messageText});
 }
 
 class EventClientConnect extends P2PMessage {

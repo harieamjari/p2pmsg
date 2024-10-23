@@ -3,6 +3,25 @@ import 'dart:async';
 import 'dart:io';
 
 class P2PUtils {
+  static String List2String(Uint8List list){
+    return String.fromCharCodes(list);
+  }
+
+  static Uint8List String2List(String str){
+    return  Uint8List.fromList(str.codeUnits);
+  }
+
+  static String fingerprintToHex(String str) {
+    String builder = '';
+    List<String> list = str.split(':');
+    for (var i = 0; i < list.length; i++) {
+      if (i > 1 && (i%2) == 0)
+        builder += ' ';
+      builder += int.parse(list[i]).toRadixString(16).padLeft(2, '0');
+    }
+    return builder;
+  }
+
   static int UnixEpoch() {
     return (DateTime.now().millisecondsSinceEpoch / 1000).toInt();
   }

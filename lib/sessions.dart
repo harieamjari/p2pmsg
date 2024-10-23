@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:uuid/uuid.dart';
+import 'package:flutter/rendering.dart';
 import 'dart:io';
 import 'sessions.dart';
 import 'p2pmsg.dart';
@@ -10,6 +11,7 @@ class Session {
   final String uuid;
   final String name;
   final String keyFingerprint;
+  void Function() ?onMessage;
 
   bool isOnline = false;
   Socket ?socket;
@@ -38,6 +40,38 @@ class SessionPage extends StatefulWidget {
 }
 
 class _SessionPageState extends State<SessionPage> {
+  final ScrollController _scrollController = ScrollController();
+  String messageText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.session.onMessage = _onMessage;
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    widget.session.onMessage = null;
+  }
+
+  void _onMessage() {
+    setState((){});
+  }
+
+  void _scrollDown() {
+    _scrollController.animateTo(
+      0.0,// _scrollController.position.maxScrollExtent,
+      duration: Duration(seconds: 1),
+      curve: Curves.fastOutSlowIn,
+    );
+  }
+
+  double ?_listItemExtentBuilder(int index, SliverLayoutDimensions dimensions) {
+    if (index > widget.session.messages.length) return null;
+    return 150.0; 
+  }
+
   Widget _listMessageBuilder(BuildContext context, int index) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,8 +124,11 @@ class _SessionPageState extends State<SessionPage> {
     return RefreshIndicator(
       onRefresh: _onRefresh,
       child: ListView.builder(
+        controller: _scrollController,
         itemCount: widget.session.messages.length,
         itemBuilder: _listMessageBuilder,
+        reverse: true,
+       // itemExtentBuilder: _listItemExtentBuilder,
       ),
     );
   }
@@ -123,7 +160,7 @@ class _SessionPageState extends State<SessionPage> {
                         constraints: BoxConstraints(maxHeight: 100.0),
                         child: TextField(
                           controller: textController,
-                          onChanged: (String value) {},
+                          onChanged: (String value) {messageText = value;},
                           keyboardType: TextInputType.multiline,
                           maxLines: null,
                           decoration: InputDecoration(
@@ -138,6 +175,9 @@ class _SessionPageState extends State<SessionPage> {
                 Container(
                   child: IconButton(icon: Icon(Icons.send), color: Color(0xFF2274A5), onPressed: () {
                     textController.clear();
+                    setState((){widget.session.messages.insert(0, messageText);});
+                    messageText = '';
+                    _scrollDown(); 
                   }),
                   padding: const EdgeInsets.fromLTRB(0,4,7,4),
                 ),
@@ -176,6 +216,10 @@ class _NewSessionPageState extends State<NewSessionPage> {
     if (widget.p2pService.services.length != 0)
       setState((){});
     return Future.delayed(Duration(seconds: 2));
+  }
+
+  void _onDiscovery(){
+    setState((){});
   }
 
   Widget _listServicesBuilder(BuildContext context, int index) {
@@ -235,12 +279,14 @@ class _NewSessionPageState extends State<NewSessionPage> {
 
   @override
   initState() {
+    widget.p2pService.onDiscoveryState = _onDiscovery;
     super.initState();
   }
 
   @override
   dispose() {
     super.dispose();
+    widget.p2pService.onDiscoveryState = null;
   }
 
   @override
@@ -271,15 +317,10 @@ class SessionsPage extends StatefulWidget {
 
   final P2PService p2pService;
 
-//  final BonsoirService service;
-//  final PublicKeyMetadata pkeyMetadata;
-
   SessionsPage(
       {super.key,
       required this.keyPair,
-//      required this.pkeyMetadata,
-//      required this.service,
-      required this.password}) : p2pService = P2PService(serverPkey: keyPair.publicKey) {
+      required this.password}) : p2pService = P2PService(keyPair: keyPair, password: password) {
   }
 
   @override
@@ -314,13 +355,23 @@ class _SessionsPageState extends State<SessionsPage> {
 
   _p2pEventHandler(P2PMessage event) {
     switch (event){
-     case EventMessageE(senderFingerprint: String senderFingerprint):
-       sessions[senderFingerprint]!.emessages.add(event);
+     case EventMessageText(senderFingerprint: String senderFingerprint, messageText: String messageText):
+       // onMessage is a callback registered on _SessionPageState.initState().
+       // It is only registered when we're actually in SessionPage.
+       // Usually, it is just some setState().
+
+//       if (sessions[senderFingerprint]!.onMessage != null)
+//         sessions[senderFingerprint]!.onMessage!();
+       ScaffoldMessenger.of(context)
+           .showSnackBar(SnackBar(content: Text(messageText)));
+       break;
      case EventClientConnect(timestamp: int timestamp, name: String name, keyFingerprint: String keyFingerprint, socket: Socket socket):
-        sessions.addAll(<String,Session>{
+        setState((){sessions.addAll(<String,Session>{
           keyFingerprint: Session(name: name, keyFingerprint: keyFingerprint, socket: socket),
-        });
+        });});
+       break;
      case EventClientDisconnect(timestamp: int timestamp, keyFingerprint: String keyFingerprint):
+       break;
      default:;
     }
 
@@ -337,7 +388,8 @@ class _SessionsPageState extends State<SessionsPage> {
             MaterialPageRoute(
                 builder: (context) => SessionPage(
                       session: session,
-                    )),
+                ),
+            ),
           );
         },
         title: Text(session.name),
@@ -352,13 +404,12 @@ class _SessionsPageState extends State<SessionsPage> {
   }
 
   _bodyBuilder(context) {
-    if (_isLoading) return CircularProgressIndicator();
     if (sessions.length == 0) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text('No available sessions'),
+            _isLoading ? CircularProgressIndicator() : const Text('No available sessions'),
           ],
         ),
       ); // return
