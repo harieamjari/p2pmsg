@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:uuid/uuid.dart';
+import 'utils.dart';
 import 'sessions.dart';
 import 'settings.dart';
 
@@ -46,31 +47,13 @@ class _SetupPageState extends State<SetupPage> {
     );
     keyPair.then((key) async {
       PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(key.publicKey);
-      BonsoirService service = BonsoirService(
-        name: _fingerprintToHex(metadata.fingerprint) +
-             '-' + int.parse(DateTime.now().millisecondsSinceEpoch/1000).toRadixString(16),
-        type: '_p2pmsg._tcp',
-        port: P2PSettings.port,
-        attributes: {
-          'userName': _name,
-          'userEmail': _email,
-          'algorithm': metadata.algorithm,
-          'keyId': metadata.keyId,
-          'keyIdShort': metadata.keyIdShort,
-          'keyIdNumeric': metadata.keyIdShort,
-          'isSubKey': (metadata.isSubKey ? 'true' : 'false'),
-          'canSign': (metadata.canSign ? 'true' : 'false'),
-          'canEncrypt': (metadata.canEncrypt ? 'true' : 'false'),
-          'uuid': Uuid().v1(),
-        }
-      );
       Navigator.pushReplacement<void, void>(
         context,
           MaterialPageRoute<void>(
             builder: (context) => SessionsPage(
               keyPair: key,
-              pkeyMetadata: metadata,
-              service: service),
+              //pkeyMetadata: metadata,
+              password: _password),
           ),
       );
       setState(() => _isLoading = false);
@@ -140,7 +123,7 @@ class _SetupPageState extends State<SetupPage> {
           onPressed: () { if(!_isLoading) _onSubmit(); },
           icon: _isLoading
             ? Container(
-                padding: const EdgeInsets.all(3.0),
+                padding: const EdgeInsets.all(1.0),
                 child: const CircularProgressIndicator(
                   color: Colors.white,
                   strokeWidth: 3,

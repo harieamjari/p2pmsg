@@ -1,24 +1,162 @@
 import 'package:flutter/material.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:bonsoir/bonsoir.dart';
-import 'package:grpc/grpc.dart';
 import 'package:uuid/uuid.dart';
-import 'session.dart';
+import 'dart:io';
+import 'sessions.dart';
 import 'p2pmsg.dart';
-import 'message.dart';
 
-
-class Session { 
-  final uuid;
+class Session {
+  final String uuid;
   final String name;
   final String keyFingerprint;
-  
-  Session({required this.name, required this.keyFingerprint}) : uuid = Uuid().v1();
+
+  bool isOnline = false;
+  Socket ?socket;
+
+  List<String> messages = <String>[
+    'this',
+    'i',
+    'send',
+    'Alpha bravo charlie delta echo foxtrot golf hotel india juliet'
+  ];
+  List<EventMessageE> emessages = <EventMessageE>[];
+
+  String toString() {
+    return keyFingerprint;
+  }
+
+  Session({required this.name, required this.keyFingerprint, this.socket})
+      : uuid = Uuid().v1();
+}
+
+class SessionPage extends StatefulWidget {
+  Session session;
+  SessionPage({required this.session});
+
+  State<SessionPage> createState() => _SessionPageState();
+}
+
+class _SessionPageState extends State<SessionPage> {
+  Widget _listMessageBuilder(BuildContext context, int index) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: EdgeInsets.all(5.0),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width - 60.0),
+            child: Container(
+              padding: const EdgeInsets.all(7.0),
+              child: Text(widget.session.messages[index],
+                  style: TextStyle(fontSize: 16.0, color: Colors.white)),
+              decoration: BoxDecoration(
+                color: Color(0xFFFFBF00),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ),
+        //SizedBox(height: 8.0),
+      ],
+    );
+//    return ListTile(
+//      title: Text(widget.session.messages[index]),
+//    );
+  }
+
+  Future<void> _onRefresh() {
+    return Future.delayed(Duration(seconds: 1));
+  }
+
+  _bodyBuilder(context) {
+    Session session = widget.session;
+    if (widget.session.messages.length == 0) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                  maxWidth: MediaQuery.sizeOf(context).width / 2),
+              child: Text(
+                  'This might be the beginning of your legendary conversation with ${session.name}', style: TextStyle(fontStyle: FontStyle.italic)),
+            ),
+          ],
+        ),
+      ); // return
+    }
+    return RefreshIndicator(
+      onRefresh: _onRefresh,
+      child: ListView.builder(
+        itemCount: widget.session.messages.length,
+        itemBuilder: _listMessageBuilder,
+      ),
+    );
+  }
+
+  Widget build(BuildContext context) {
+    var textController = TextEditingController();
+    return WillPopScope(
+      onWillPop: () async {
+        Navigator.pop(context, false);
+
+        return Future.value(true);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          //backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          backgroundColor:
+              Color(0xFFE83F6F), //Theme.of(context).colorScheme.inversePrimary,
+          title: const Text('Session', style: TextStyle(color: Colors.white)),
+        ),
+        body: Column(
+          children: [
+            Expanded(child: _bodyBuilder(context)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Flexible(
+                    child: Container(
+                        padding: EdgeInsets.fromLTRB(9,4,0,4),
+                        constraints: BoxConstraints(maxHeight: 100.0),
+                        child: TextField(
+                          controller: textController,
+                          onChanged: (String value) {},
+                          keyboardType: TextInputType.multiline,
+                          maxLines: null,
+                          decoration: InputDecoration(
+                            hintText: "Message",
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(18),
+                                borderSide: BorderSide.none),
+                            fillColor: Color(0xFFFFBF00).withOpacity(0.1),
+                            filled: true,
+                            //prefixIcon: const Icon(Icons.email)
+                          )))),
+                Container(
+                  child: IconButton(icon: Icon(Icons.send), color: Color(0xFF2274A5), onPressed: () {
+                    textController.clear();
+                  }),
+                  padding: const EdgeInsets.fromLTRB(0,4,7,4),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ), // Scaffold
+    );
+  }
 }
 
 class NewSessionPage extends StatefulWidget {
   final String userFingerprint;
-  const NewSessionPage({super.key, required this.userFingerprint});
+  final Map<String, Session> sessions;
+  final P2PService p2pService;
+  const NewSessionPage(
+      {super.key, required this.userFingerprint, required this.sessions, required this.p2pService});
 
   @override
   State<NewSessionPage> createState() => _NewSessionPageState();
@@ -26,234 +164,255 @@ class NewSessionPage extends StatefulWidget {
 
 // Discovers _p2pmsg._tcp services
 class _NewSessionPageState extends State<NewSessionPage> {
-  final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp'); 
-  List<BonsoirService> _services = <BonsoirService>[];
+  //final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp');
 
+  bool _newAdded = false;
 
-  List<Sessions> _newSessions = <Sessions>[];
+  String _yubiSplit(String? s) {
+    return (s ?? '').split('-')[0];
+  }
 
-  _onTap (BonsoirService service) {
-    _newSessions.add(
-      name: service.attributes['userName'] ?? '',
-      keyFingerprint: service.name ?? '',
-    );
+  Future<void> _onRefresh() {
+    if (widget.p2pService.services.length != 0)
+      setState((){});
+    return Future.delayed(Duration(seconds: 2));
   }
 
   Widget _listServicesBuilder(BuildContext context, int index) {
     return Card(
       child: ListTile(
-        onTap: () => _onTap(_services[index]),
-        title: Text(
-          (_services[index].attributes['userName'] ?? '') +
-          ' <' + (_services[index].attributes['userEmail'] ?? '') + '>'
-        ),
-        subtitle: Text('fingerprint: ' + _services[index].name ?? ''),
+        onTap: () {
+          //_onTap(widget.p2pService.services[index]);
+          BonsoirService service = widget.p2pService.services[index];
+          String name = _yubiSplit(service.name);
+          if (widget.sessions.containsKey(name))
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('User already exist')));
+          else {
+            _newAdded = true;
+            widget.sessions.addAll(<String, Session>{
+              '${name}': Session(
+                name: service.attributes['userName'] ?? '',
+                keyFingerprint: name,
+              )
+            });
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('Added')));
+          }
+        },
+        title: Text((widget.p2pService.services[index].attributes['userName'] ?? '') +
+            ' <' +
+            (widget.p2pService.services[index].attributes['userEmail'] ?? '') +
+            '>'),
+        subtitle: Text('fingerprint: ' + widget.p2pService.services[index].name ?? ''),
         leading: Icon(Icons.account_circle_rounded),
       ),
     );
   }
 
 
-  _onBonsoirDiscoveryEvent(BonsoirDiscoveryEvent event) {
-    switch (event.type) {
-      case BonsoirDiscoveryEventType.discoveryServiceFound:
-        event.service!.resolve(discovery.serviceResolver);
-      case BonsoirDiscoveryEventType.discoveryServiceResolved:
-      // ignore our own broadcast
-        if (event.service != null /*&& event.service!.name != widget.userFingerprint*/)
-          setState(() => _services.add(event.service!));
-      case BonsoirDiscoveryEventType.discoveryServiceLost:
-        setState(() => _services.removeWhere((service) => service.name == event.service?.name));
-      default:;
-    }
-  }
-
   _bodyBuilder(context) {
-    if (_services.length == 0) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('No available users'),
-          ],
-        ),
-      ); // return
-    }
-    return ListView.builder(
-      itemCount: _services.length,
-      itemBuilder: _listServicesBuilder,
+    return RefreshIndicator(
+      onRefresh: _onRefresh,
+      child: () {
+        if (widget.p2pService.services.length == 0) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                const Text('No available users'),
+              ],
+            ),
+          ); // return
+        }
+        return ListView.builder(
+          itemCount: widget.p2pService.services.length,
+          itemBuilder: _listServicesBuilder,
+        );
+      }(),
     );
   }
 
   @override
   initState() {
     super.initState();
-    discovery.ready.then((_) { 
-      discovery.eventStream!.listen((event) =>
-        _onBonsoirDiscoveryEvent(event)
-      );
-      discovery.start();
-    });
   }
 
   @override
   dispose() {
-    discovery.stop().then((_) => super.dispose());
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        if (_newSessions.length == 0)
-          Navigator.pop(context, null);
-        else
-          Navigator.pop(context, _newSessions);
+        Navigator.pop(context, _newAdded);
 
         return Future.value(true);
       },
-      child: 
-        Scaffold(
-          appBar: AppBar(
-            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-            title: const Text('New session', style: TextStyle(color: Colors.white)),
-          ),
-          body: _bodyBuilder(context),
-        ), // Scaffold
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Color(0xFFE83F6F),
+          title:
+              const Text('New session', style: TextStyle(color: Colors.white)),
+        ),
+        body: _bodyBuilder(context),
+      ), // Scaffold
     );
   }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class SessionsPage extends StatefulWidget {
+  // NOTE: must be in a secure memory to prevent being
+  // swapped to the disk. 
+  final String password;
   final KeyPair keyPair;
-  final BonsoirService service;
-  final PublicKeyMetadata pkeyMetadata;
 
-  const SessionsPage({
-    super.key,
-    required this.keyPair,
-    required this.pkeyMetadata,
-    required this.service
-  });
-    
+  final P2PService p2pService;
+
+//  final BonsoirService service;
+//  final PublicKeyMetadata pkeyMetadata;
+
+  SessionsPage(
+      {super.key,
+      required this.keyPair,
+//      required this.pkeyMetadata,
+//      required this.service,
+      required this.password}) : p2pService = P2PService(serverPkey: keyPair.publicKey) {
+  }
+
   @override
   State<SessionsPage> createState() => _SessionsPageState();
 }
 
-enum BroadcastStatus {
-  started,
-  starting,
-  stopped,
-  stopping,
-}
-
 class _SessionsPageState extends State<SessionsPage> {
-  List<Session> sessions = <Session>[];
-  BonsoirBroadcast ?broadcast = null;
-  BroadcastStatus _broadcastStatus = BroadcastStatus.stopped;
+  //List<Session> sessions = <Session>[];
+  Map<String, Session> sessions = {};
   bool _isBroadcast = false;
+  bool _isLoading = true;
 
+  _p2pInit() async {
+    setState((){_isLoading = true;});
+    widget.p2pService.events?.listen(_p2pEventHandler);
+    await widget.p2pService.start(); 
+    setState((){_isLoading = false;});
+  }
+  
+  @override
+  initState() {
+    super.initState();
+    _p2pInit();
+  }
+
+  @override
+  dispose() {
+    if (widget.p2pService.broadcastStatus != P2PBroadcastStatus.stopped ||
+        widget.p2pService.broadcastStatus != P2PBroadcastStatus.stopping) widget.p2pService.broadcastStop();
+    super.dispose();
+  }
+
+  _p2pEventHandler(P2PMessage event) {
+    switch (event){
+     case EventMessageE(senderFingerprint: String senderFingerprint):
+       sessions[senderFingerprint]!.emessages.add(event);
+     case EventClientConnect(timestamp: int timestamp, name: String name, keyFingerprint: String keyFingerprint, socket: Socket socket):
+        sessions.addAll(<String,Session>{
+          keyFingerprint: Session(name: name, keyFingerprint: keyFingerprint, socket: socket),
+        });
+     case EventClientDisconnect(timestamp: int timestamp, keyFingerprint: String keyFingerprint):
+     default:;
+    }
+
+  }
 
   Widget listSessionBuilder(BuildContext context, int index) {
+    List<String> keys = sessions.keys.toList();
+    Session session = sessions[keys[index]]!;
     return Card(
       child: ListTile(
-        title: Text(sessions[index].name),
-        subtitle: Text('fingerprint: ' + sessions[index].keyFingerprint),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (context) => SessionPage(
+                      session: session,
+                    )),
+          );
+        },
+        title: Text(session.name),
+        subtitle: Text('fingerprint: ' + session.keyFingerprint),
+        trailing: Icon(Icons.arrow_forward),
       ),
     );
   }
 
+  Future<void> _onRefresh() {
+    return Future.delayed(Duration(seconds: 2));
+  }
+
   _bodyBuilder(context) {
+    if (_isLoading) return CircularProgressIndicator();
     if (sessions.length == 0) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text('No sessions'),
+            const Text('No available sessions'),
           ],
         ),
       ); // return
     }
-    return ListView.builder(
-      itemCount: sessions.length,
-      itemBuilder: listSessionBuilder,
-    );
+    return RefreshIndicator(
+        onRefresh: _onRefresh,
+        child: ListView.builder(
+          itemCount: sessions.length,
+          itemBuilder: listSessionBuilder,
+        ));
   }
 
-  _newSessions(session) {
+  _newSessions(Map<String, Session> msessions) {
     setState(() {
-      sessions.add(session);
+      sessions.addAll(msessions);
     });
-  }
-
-  _onBonsoirBroadcastEvent(BonsoirBroadcastEvent event) {
-    switch (event.type) {
-      case BonsoirBroadcastEventType.broadcastStarted:
-        _broadcastStatus = BroadcastStatus.started;
-      case BonsoirBroadcastEventType.broadcastStopped:
-        _broadcastStatus = BroadcastStatus.stopped;
-      default:;
-    }
-  }
-
-  @override
-  dispose() {
-    if (_broadcastStatus != BroadcastStatus.stopped ||
-        _broadcastStatus != BroadcastStatus.stopping)
-      broadcast?.stop();
-    super.dispose();
+    // Then Resolve sessions
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor:
+            Color(0xFFE83F6F), //Theme.of(context).colorScheme.inversePrimary,
+
         title: const Text('Sessions', style: TextStyle(color: Colors.white)),
         centerTitle: true,
         actions: [
           Switch(
             value: _isBroadcast,
-            activeColor: Colors.green,
-            onChanged: (bool value)  {
-            // FIXME problem arises when user toggles switch very fast
-              if (_broadcastStatus == BroadcastStatus.starting ||
-                  _broadcastStatus == BroadcastStatus.stopping)
+            activeColor: Color(0xFF32936F),
+            activeTrackColor: Colors.white,
+            onChanged: (bool value) {
+              if (_isLoading) {
                 return;
-
+              }
+              if (widget.p2pService.broadcastStatus == P2PBroadcastStatus.starting ||
+                  widget.p2pService.broadcastStatus == P2PBroadcastStatus.stopping) return;
 
               // If stopped, start it
-              if (_broadcastStatus == BroadcastStatus.stopped) {
-                _broadcastStatus = BroadcastStatus.starting;
-                assert(value == true); 
-                setState(() { _isBroadcast = true; });
-                broadcast = BonsoirBroadcast(service: widget.service);
-                broadcast!.ready.then((_) {
-                  broadcast!.eventStream?.listen((event) => 
-                    _onBonsoirBroadcastEvent(event));
-                  broadcast?.start();
+              if (widget.p2pService.broadcastStatus == P2PBroadcastStatus.stopped) {
+                assert(value == true);
+                setState(() {
+                  _isBroadcast = true;
+                  widget.p2pService.broadcastStart();
                 });
-              // If started, stop it
-              } else if (_broadcastStatus == BroadcastStatus.started) {
-                _broadcastStatus = BroadcastStatus.stopping;
-                assert(value == false); 
-                setState(() { _isBroadcast = false; });
-                broadcast?.stop();
+                // If started, stop it
+              } else if (widget.p2pService.broadcastStatus == P2PBroadcastStatus.started) {
+                assert(value == false);
+                setState(() {
+                  _isBroadcast = false;
+                  widget.p2pService.broadcastStop();
+                });
               }
             },
           ), // switch
@@ -263,16 +422,21 @@ class _SessionsPageState extends State<SessionsPage> {
       floatingActionButton: FloatingActionButton(
         //onPressed: newSession,
         onPressed: () async {
-          final List<Sessions>? sessions = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => NewSessionPage(
-                userFingerprint: widget.pkeyMetadata.fingerprint
-              )
-            ),
-          );
-          if (sessions != null) {
-            _newSessions(sessions!);
+          if (_isLoading) {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('Service is loading...')));
+            return;
           }
+          final bool newAdded = await Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (context) => NewSessionPage(
+                      userFingerprint: widget.p2pService.serverPkeyMeta.fingerprint,
+                      sessions: this.sessions,
+                      p2pService: widget.p2pService,
+                    )),
+          );
+          if (newAdded) setState(() {});
         },
         tooltip: 'New session',
         child: const Icon(Icons.add, color: Colors.white),

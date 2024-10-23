@@ -34,10 +34,14 @@
 //  4 bytes   | PGP signature length
 //  ....      | PGP signature
 
+import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
+import 'package:uuid/uuid.dart';
+import 'utils.dart';
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
+import 'utils.dart';
 
 int _UnixEpoch() {
   return (DateTime.now().millisecondsSinceEpoch / 1000).toInt();
@@ -109,11 +113,13 @@ class _P2PSocket {
   final Socket socket;
   String hostPkey = '';
   String hostFingerprint = '';
-  final hostPkeyMeta;
+  final PublicKeyMetadata hostPkeyMeta;
 
   String endpointPkey = '';
   String endpointFingerprint = '';
-  var endpointPkeyMeta;
+  late PublicKeyMetadata endpointPkeyMeta;
+
+  bool hasHandshake = false;
 
   late StreamSubscription<Uint8List> streamSub;
 
@@ -126,15 +132,15 @@ class _P2PSocket {
     if (onClose != null) onClose!(socket);
     if (endpointPkey != '') {
       sink.add(EventClientDisconnect(
-          timestamp: _UnixEpoch(), publicKey: endpointPkey));
+          timestamp: P2PUtils.UnixEpoch(), keyFingerprint: endpointFingerprint));
     }
   }
 
   /////// HACK: We're recursively parsing the message which may
-  /////// provide extra overhead
+  /////// provide extra overhead and we still need to deal with bigger file uploads
+ //////// and kill the connection.
   void _parseMessage(Uint8List data) {
     try {
-      // Maximum 16 Kib
       _buf.addAll(data);
       if (_buf.length < _expectingLen) return;
       print('parsin message');
@@ -154,7 +160,7 @@ class _P2PSocket {
       _buf.removeRange(0, signatureLen);
 
       sink.add(
-          MessageMessageE(signature: listSignature, encrypted: listEncrypted));
+          EventMessageE(signature: listSignature, encrypted: listEncrypted, senderFingerprint: endpointFingerprint));
 //      print('parsing successful');
 //      print('encrypted ${listEncrypted}');
 //      print('signature ${listSignature}');
@@ -188,6 +194,12 @@ class _P2PSocket {
     _expectingLen = _list2Uint32(_buf);
     _buf.removeRange(0, 4);
     print('message ok expecting ${_expectingLen} bytes');
+    if (_expectingLen > 8 * 1024) {
+      print('exceeded max message length ${_expectingLen}');
+      if (onClose != null) onClose!(socket);
+      socket.destroy();
+      return;
+    }
     streamSub.onData(_parseMessage);
     _parseMessage(Uint8List(0));
   }
@@ -196,9 +208,21 @@ class _P2PSocket {
   void _parseHandshake(Uint8List data) {
     try {
       // Maximum 16 Kib
+      if (_buf.length + data.length > _expectingLen) {
+        print('exceeded max message length ${_expectingLen}');
+        if (onClose != null) onClose!(socket);
+        socket.destroy();
+        return;
+      }
       _buf.addAll(data);
       if (_buf.length < _expectingLen) return;
       print('parsing handshake');
+      if (hasHandshake) {
+        print('endpoint insane');
+        socket.destroy();
+        return;
+      }
+
 
       // timestamp 64 bit (network order)
       int timestamp = _list2Uint64(_buf);
@@ -231,8 +255,13 @@ class _P2PSocket {
       print('parsing successful');
 
       if (endpointType == EndpointType.client) _sendHandshake();
-      sink.add(
-          EventClientConnect(timestamp: timestamp, publicKey: endpointPkey));
+      OpenPGP.getPublicKeyMetadata(endpointPkey).then((PublicKeyMetadata meta) {  
+        endpointPkeyMeta = meta;
+        endpointFingerprint = P2PUtils.fingerprintToHex(meta.fingerprint);
+        sink.add(
+            EventClientConnect(timestamp: timestamp, name: meta.identities[0].name,
+              keyFingerprint: endpointFingerprint, socket: socket));
+      });
     } catch (e) {
       print('parsing failure');
       socket.destroy();
@@ -264,8 +293,8 @@ class _P2PSocket {
     _expectingLen = _list2Uint32(_buf);
    // print('handshake successful expecting ${_expectingLen} bytes');
     // max 16kib
-    if (_buf.length + data.length > 16 * 1024) {
-      //print('exceeded max message length');
+    if (_expectingLen > 16 * 1024) {
+      print('exceeded max handshake length');
       if (onClose != null) onClose!(socket);
       socket.destroy();
       return;
@@ -315,7 +344,7 @@ class _P2PSocket {
 //    print('received ${_buf}');
 //
 //    // Parsed successfully? add message
-//    sink.add(MessageMessageE(
+//    sink.add(EventMessageE(
 //      signature: Uint8List(32),
 //      encrypted: Uint8List(32),
 //    ));
@@ -354,18 +383,47 @@ class _P2PSocket {
 }
 
 ///////////////////////////////////////////////
+enum P2PBroadcastStatus {
+  starting,
+  started,
+  stopping,
+  stopped,
+}
 
 class P2PService {
   final int port;
-  final String pkey;
-  final serverPkeyMeta;
+  late String serverPkey;
+  late PublicKeyMetadata serverPkeyMeta;
+  late BonsoirService _serverService;
+  final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp');
+
   Stream<P2PMessage>? events;
-  late StreamController<P2PMessage> _streamController;
+  final StreamController<P2PMessage> _streamController;
   late ServerSocket _server;
-
+  List<BonsoirService> services = <BonsoirService>[];
   List<_P2PSocket> _clients = <_P2PSocket>[];
+  BonsoirBroadcast? serverBroadcast = null;
+  P2PBroadcastStatus broadcastStatus = P2PBroadcastStatus.stopped;
 
- P2PService({this.port = 6573, required this.pkey, required this.serverPkeyMeta});
+  P2PService({this.port = 6573, required this.serverPkey}) :_streamController = StreamController() {
+    events = _streamController.stream;
+  }
+
+
+  String _yubiSplit(String? s) {
+    return (s ?? '').split('-')[0];
+  }
+
+  String _fingerprintToHex(String str) {
+    String builder = '';
+    List<String> list = str.split(':');
+    for (var i = 0; i < list.length; i++) {
+      if (i > 1 && (i%2) == 0)
+        builder += ' ';
+      builder += int.parse(list[i]).toRadixString(16).padLeft(2, '0');
+    }
+    return builder;
+  }
 
   _onClose(Socket socket) {
     print('Client disconnected');
@@ -376,17 +434,55 @@ class P2PService {
     print('Client connected');
     _clients.add(_P2PSocket.endpointClient(
       socket: client,
-      hostPkey: pkey,
-      hostPkeyMeta: 1,
+      hostPkey: serverPkey,
+      hostPkeyMeta: serverPkeyMeta,
       sink: _streamController.sink,
       onClose: _onClose,
     ));
   }
-
-  void ready() {
-    _streamController = StreamController();
-    events = _streamController.stream;
+  _onBonsoirDiscoveryEvent(BonsoirDiscoveryEvent event) {
+    switch (event.type) {
+      case BonsoirDiscoveryEventType.discoveryServiceFound:
+        event.service!.resolve(discovery.serviceResolver);
+      case BonsoirDiscoveryEventType.discoveryServiceResolved:
+        // ignore our own broadcast
+        if (event.service !=
+            null /*&& event.service!.name != widget.userFingerprint*/)
+          services.add(event.service!);
+      case BonsoirDiscoveryEventType.discoveryServiceLost:
+        services
+            .removeWhere((service) => service.name == event.service?.name);
+      default:
+        ;
+    }
   }
+
+  void _onBonsoirBroadcastEvent(BonsoirBroadcastEvent event) {
+    switch (event.type) {
+      case BonsoirBroadcastEventType.broadcastStarted:
+        broadcastStatus = P2PBroadcastStatus.started;
+      case BonsoirBroadcastEventType.broadcastStopped:
+        broadcastStatus = P2PBroadcastStatus.stopped;
+      default:;
+    }
+  }
+
+  void broadcastStart(){
+    assert(broadcastStatus == P2PBroadcastStatus.stopped);
+    broadcastStatus = P2PBroadcastStatus.starting;
+    serverBroadcast = BonsoirBroadcast(service: _serverService);
+    serverBroadcast!.ready.then((_) {
+      serverBroadcast!.eventStream
+          ?.listen((event) => _onBonsoirBroadcastEvent(event));
+      serverBroadcast?.start();
+    });
+  }
+  void broadcastStop(){
+    assert(broadcastStatus == P2PBroadcastStatus.started);
+    broadcastStatus = P2PBroadcastStatus.stopping;
+    serverBroadcast?.stop();
+  }
+
 
   // returns 0, (false) if success
   Future<bool> connect(
@@ -398,10 +494,10 @@ class P2PService {
       print('Manually connected');
       _clients.add(_P2PSocket.endpointServer(
         socket: server,
-        hostPkey: pkey,
-        hostPkeyMeta: 1,
+        hostPkey: serverPkey,
+        hostPkeyMeta: serverPkeyMeta,
         sink: _streamController.sink,
-        endpointFingerprint: '',
+        endpointFingerprint: keyFingerprint,
         onClose: _onClose,
       ));
       return Future.value(false);
@@ -411,55 +507,107 @@ class P2PService {
     }
   }
 
+  Future<bool> resolve(String keyFingerprint){
+    for (int i = 0; i < services.length; i++){
+      if (keyFingerprint != services[i].name.split('-')[0])
+        continue;
+      return Future.value(true);
+    }
+    return Future.value(false);
+  }
+
   Future<void> start() async {
+    serverPkeyMeta = await OpenPGP.getPublicKeyMetadata(serverPkey);
+    _serverService = BonsoirService(
+      name: _fingerprintToHex(serverPkeyMeta.fingerprint) +
+           '-' + P2PUtils.UnixEpoch().toRadixString(16),
+      type: '_p2pmsg._tcp',
+      port: port,
+      attributes: {
+        'userName': serverPkeyMeta.identities[0].name,
+        'userEmail': serverPkeyMeta.identities[0].email,
+        'algorithm': serverPkeyMeta.algorithm,
+        'keyId': serverPkeyMeta.keyId,
+        'keyIdShort': serverPkeyMeta.keyIdShort,
+        'keyIdNumeric': serverPkeyMeta.keyIdShort,
+        'isSubKey': (serverPkeyMeta.isSubKey ? 'true' : 'false'),
+        'canSign': (serverPkeyMeta.canSign ? 'true' : 'false'),
+        'canEncrypt': (serverPkeyMeta.canEncrypt ? 'true' : 'false'),
+        'uuid': Uuid().v1(),
+      }
+    );
     _server = await ServerSocket.bind(InternetAddress.anyIPv4, 6573);
     // Start serving clients. If anyone connects, begin handshake
     _server.listen(_onClient);
+    await discovery.ready;
+    discovery.eventStream!.listen((event) => _onBonsoirDiscoveryEvent(event));
+    await discovery.start();
   }
 }
 
-class MessageMessageD extends P2PMessage {
+class MessageDecrypted {
   final int timestamp;
   final String mimeType;
   final Uint8List data;
-  MessageMessageD(
+  MessageDecrypted(
       {required this.timestamp, required this.mimeType, required this.data});
 }
 
 // We store the encrypted message on the disk instead of
-// the plain MessageMessageD.
-class MessageMessageE extends P2PMessage {
+// the plain MessageDecrypted.
+class EventMessageE extends P2PMessage {
+  final String senderFingerprint;
   final Uint8List encrypted;
   final Uint8List signature;
 
-  MessageMessageD decrypt(String skey) {
-    return MessageMessageD(
+  MessageDecrypted decrypt(String skey) {
+    return MessageDecrypted(
       timestamp: 0,
       mimeType: 'application/text',
-      data: Uint8List(4),
+      data: encrypted,
     );
   }
 
-  MessageMessageE({required this.signature, required this.encrypted});
+  EventMessageE({required this.signature, required this.encrypted, required this.senderFingerprint});
 }
 
 class EventClientConnect extends P2PMessage {
   final int timestamp;
-  final String publicKey;
-  EventClientConnect({required this.timestamp, required this.publicKey});
+  final String name;
+  final String keyFingerprint;
+  final Socket socket;
+  EventClientConnect({required this.timestamp, required this.name, required this.keyFingerprint, required this.socket});
 }
 
 class EventClientDisconnect extends P2PMessage {
   final int timestamp;
-  final String publicKey;
-  EventClientDisconnect({required this.timestamp, required this.publicKey});
+  final String keyFingerprint;
+  EventClientDisconnect({required this.timestamp, required this.keyFingerprint});
+}
+
+class EventClientOnline extends P2PMessage {
+  final String clientFingerprint;
+  EventClientOnline({required this.clientFingerprint});
+}
+
+class EventClientOffline extends P2PMessage {
+  final String clientFingerprint;
+  EventClientOffline({required this.clientFingerprint});
+}
+
+class EventBroadcastStarted extends P2PMessage {
+  EventBroadcastStarted();
+}
+
+class EventBroadcastStopped extends P2PMessage {
+  EventBroadcastStopped();
 }
 
 //void handleEvent(P2PMessage event) {
 //  switch (event) {
 //    case EventClientConnect(timestamp: var timestamp, publicKey: var publicKey):
 //      print('client connect: ${timestamp} ${publicKey}');
-//    case MessageMessageE(
+//    case EventMessageE(
 //        signature: Uint8List listSignature,
 //        encrypted: Uint8List listEncrypted
 //      ):
@@ -471,7 +619,6 @@ class EventClientDisconnect extends P2PMessage {
 //
 //Future<void> main() async {
 //  P2PService p2pService = P2PService(pkey: 'he', serverPkeyMeta: 1);
-//  p2pService.ready();
 //  p2pService.events?.listen(handleEvent);
 //  await p2pService.start();
 //  print('ok');
