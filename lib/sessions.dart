@@ -1,28 +1,37 @@
+
+import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/rendering.dart';
-import 'dart:io';
 import 'sessions.dart';
 import 'p2pmsg.dart';
+import 'utils.dart';
+import 'quotes.dart';
 
+enum P2PEndpointStatus {
+  active,
+  online,
+  offline,
+}
 class Session {
   final String uuid;
   final String name;
   final String keyFingerprint;
   void Function() ?onMessage;
+  P2PEndpointStatus status = P2PEndpointStatus.offline;
 
-  bool isOnline = false;
   Socket ?socket;
 
-  List<String> messages = <String>[
-    'this',
-    'i',
-    'send',
-    'Alpha bravo charlie delta echo foxtrot golf hotel india juliet'
-  ];
-  List<EventMessageE> emessages = <EventMessageE>[];
+//  List<String> messages = <String>[
+//    'this',
+//    'i',
+//    'send',
+//    'Alpha bravo charlie delta echo foxtrot golf hotel india juliet'
+//  ];
+  List<P2PMessage> messages = <P2PMessage>[];
 
   String toString() {
     return keyFingerprint;
@@ -34,7 +43,8 @@ class Session {
 
 class SessionPage extends StatefulWidget {
   Session session;
-  SessionPage({required this.session});
+  P2PService p2pService;
+  SessionPage({required this.session, required this.p2pService});
 
   State<SessionPage> createState() => _SessionPageState();
 }
@@ -60,11 +70,12 @@ class _SessionPageState extends State<SessionPage> {
   }
 
   void _scrollDown() {
-    _scrollController.animateTo(
-      0.0,// _scrollController.position.maxScrollExtent,
-      duration: Duration(seconds: 1),
-      curve: Curves.fastOutSlowIn,
-    );
+    if (widget.session.messages.length != 1) 
+      _scrollController.animateTo(
+        0.0,// _scrollController.position.maxScrollExtent,
+        duration: Duration(seconds: 1),
+        curve: Curves.fastOutSlowIn,
+      );
   }
 
   double ?_listItemExtentBuilder(int index, SliverLayoutDimensions dimensions) {
@@ -73,8 +84,21 @@ class _SessionPageState extends State<SessionPage> {
   }
 
   Widget _listMessageBuilder(BuildContext context, int index) {
+    var alignment = CrossAxisAlignment.start;
+    P2PMessageStatus msgStatus = P2PMessageStatus.failed;
+    var text = Text('unknown',
+                    style: TextStyle(fontSize: 16.0, color: Colors.white));
+    switch (widget.session.messages[index]) {
+      case EventMessageText(senderFingerprint: String senderFingerprint, messageText: String messageText, messageStatus: P2PMessageStatus messageStatus):
+        msgStatus = messageStatus;
+        if (senderFingerprint == widget.p2pService.serverFingerprint)
+          alignment = CrossAxisAlignment.end; 
+        text = Text(messageText,
+                    style: TextStyle(fontSize: 16.0, color: Colors.white));
+      default:; 
+    }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: alignment,
       children: <Widget>[
         Padding(
           padding: EdgeInsets.all(5.0),
@@ -83,8 +107,7 @@ class _SessionPageState extends State<SessionPage> {
                 maxWidth: MediaQuery.sizeOf(context).width - 60.0),
             child: Container(
               padding: const EdgeInsets.all(7.0),
-              child: Text(widget.session.messages[index],
-                  style: TextStyle(fontSize: 16.0, color: Colors.white)),
+              child: text,
               decoration: BoxDecoration(
                 color: Color(0xFFFFBF00),
                 borderRadius: BorderRadius.circular(10),
@@ -92,6 +115,26 @@ class _SessionPageState extends State<SessionPage> {
             ),
           ),
         ),
+        CrossAxisAlignment.end == alignment ? 
+          Padding(
+            padding: EdgeInsets.only(right: 5.0),
+            child: Container(
+              padding: const EdgeInsets.only(right: 7.0),
+              child: Text((){
+                switch (msgStatus){
+                  case P2PMessageStatus.sent: return 'sent';
+                  case P2PMessageStatus.sending: return 'sending';
+                  case P2PMessageStatus.failed: return 'failed';
+                  default: return 'unknown';
+                }
+              }(),  style: TextStyle(fontSize: 14.0, color: Colors.grey)),
+  //            decoration: BoxDecoration(
+  //              color: Color(0xFFFFBF00),
+  //              borderRadius: BorderRadius.circular(10),
+  //            ),
+            ),
+          ) : SizedBox(height: 0, width: 0)
+        ,
         //SizedBox(height: 8.0),
       ],
     );
@@ -113,9 +156,11 @@ class _SessionPageState extends State<SessionPage> {
           children: <Widget>[
             ConstrainedBox(
               constraints: BoxConstraints(
-                  maxWidth: MediaQuery.sizeOf(context).width / 2),
-              child: Text(
-                  'This might be the beginning of your legendary conversation with ${session.name}', style: TextStyle(fontStyle: FontStyle.italic)),
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.8),
+              child: 
+  Text(P2PQuotes[Random().nextInt(P2PQuotes.length)], style: TextStyle(fontStyle: FontStyle.italic)),
+//  Text(
+//                  'This might be the beginning of your legendary conversation with ${session.name}', style: TextStyle(fontStyle: FontStyle.italic)),
             ),
           ],
         ),
@@ -175,8 +220,20 @@ class _SessionPageState extends State<SessionPage> {
                 Container(
                   child: IconButton(icon: Icon(Icons.send), color: Color(0xFF2274A5), onPressed: () {
                     textController.clear();
-                    setState((){widget.session.messages.insert(0, messageText);});
-                    messageText = '';
+                    var tempMsg = messageText;
+                    EventMessageText ev = EventMessageText(
+                      timestamp: P2PUtils.UnixEpoch(),
+                      senderFingerprint: widget.p2pService.serverFingerprint,
+                      messageText: tempMsg,
+                      messageStatus: P2PMessageStatus.sending,
+                    );
+                    setState((){
+                      messageText = '';
+                      widget.session.messages.insert(0, ev);
+                    });
+                    widget.p2pService.SendMessageText(widget.session.keyFingerprint, tempMsg).then((bool isSent){
+                        setState(() {ev.messageStatus = (isSent ? P2PMessageStatus.sent : P2PMessageStatus.failed);});
+                    });
                     _scrollDown(); 
                   }),
                   padding: const EdgeInsets.fromLTRB(0,4,7,4),
@@ -362,16 +419,31 @@ class _SessionsPageState extends State<SessionsPage> {
 
 //       if (sessions[senderFingerprint]!.onMessage != null)
 //         sessions[senderFingerprint]!.onMessage!();
+       print('recv EventMessageText');
+       sessions[senderFingerprint]!.messages.insert(0, event);
+       if (sessions[senderFingerprint]!.onMessage != null)
+         sessions[senderFingerprint]!.onMessage!();
+       //widget.session.messages.add(event);
        ScaffoldMessenger.of(context)
            .showSnackBar(SnackBar(content: Text(messageText)));
        break;
      case EventClientConnect(timestamp: int timestamp, name: String name, keyFingerprint: String keyFingerprint, socket: Socket socket):
-        setState((){sessions.addAll(<String,Session>{
-          keyFingerprint: Session(name: name, keyFingerprint: keyFingerprint, socket: socket),
-        });});
+        if (!sessions.containsKey(keyFingerprint))
+          setState((){sessions.addAll(<String,Session>{
+            keyFingerprint: Session(name: name, keyFingerprint: keyFingerprint, socket: socket),
+          });});
+        setState((){sessions[keyFingerprint]!.status = P2PEndpointStatus.active;}); 
+        //widget.p2pService.sendMessageText(keyFingerprint, 'Al-buharie is the best programmer');
        break;
      case EventClientDisconnect(timestamp: int timestamp, keyFingerprint: String keyFingerprint):
+        sessions[keyFingerprint]!.status = P2PEndpointStatus.online; 
        break;
+     case EventClientOnline(keyFingerprint: String keyFingerprint):
+       if (sessions.containsKey(keyFingerprint))
+         setState((){sessions[keyFingerprint]!.status = P2PEndpointStatus.online;});
+     case EventClientOffline(keyFingerprint: String keyFingerprint):
+       if (sessions.containsKey(keyFingerprint))
+         setState((){sessions[keyFingerprint]!.status = P2PEndpointStatus.offline;});
      default:;
     }
 
@@ -388,6 +460,7 @@ class _SessionsPageState extends State<SessionsPage> {
             MaterialPageRoute(
                 builder: (context) => SessionPage(
                       session: session,
+                      p2pService: widget.p2pService,
                 ),
             ),
           );
@@ -395,6 +468,13 @@ class _SessionsPageState extends State<SessionsPage> {
         title: Text(session.name),
         subtitle: Text('fingerprint: ' + session.keyFingerprint),
         trailing: Icon(Icons.arrow_forward),
+        leading: Icon(Icons.circle, color: (){
+          switch(session.status){
+            case P2PEndpointStatus.online: return Colors.yellow;
+            case P2PEndpointStatus.offline: return Colors.grey;
+            case P2PEndpointStatus.active: return Colors.green;
+          }
+        }()) 
       ),
     );
   }
