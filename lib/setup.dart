@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter/material.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 import 'utils.dart';
 import 'sessions.dart';
@@ -13,6 +14,7 @@ import 'settings.dart';
 // to decrypt pgp key
 class SetupPage extends StatefulWidget {
   const SetupPage({super.key});
+  final secureStorage = FlutterSecureStorage();
 
   @override
   State<SetupPage> createState() => _SetupPageState();
@@ -23,21 +25,13 @@ class _SetupPageState extends State<SetupPage> {
   String _email = '';
   String _password = '';
   bool _isLoading = false;
+  //bool _isFinished = false;
 
-  String _fingerprintToHex(String str) {
-    String builder = '';
-    List<String> list = str.split(':');
-    for (var i = 0; i < list.length; i++) {
-      if (i > 1 && (i%2) == 0)
-        builder += ' ';
-      builder += int.parse(list[i]).toRadixString(16).padLeft(2, '0');
-    }
-    return builder;
-  }
 
   void _onSubmit() {
+    if (_isLoading) return;
     setState(() => _isLoading = true);
-    var keyOptions = KeyOptions()..rsaBits = 2048;
+    var keyOptions = KeyOptions()..rsaBits = 4096;
     final keyPair = OpenPGP.generate(
       options: Options()
         ..name = _name
@@ -45,6 +39,7 @@ class _SetupPageState extends State<SetupPage> {
         ..passphrase = _password
         ..keyOptions = keyOptions
     );
+//// Dummy pgp key
 //    var keyPair = Future<KeyPair>.value(KeyPair(
 //    '''
 //-----BEGIN PGP PUBLIC KEY BLOCK-----
@@ -204,8 +199,8 @@ class _SetupPageState extends State<SetupPage> {
 //-----END PGP PRIVATE KEY BLOCK-----
 //'''));
     keyPair.then((key) async {
-      print(key.publicKey);
-      print(key.privateKey);
+      //print(key.publicKey);
+      //print(key.privateKey);
       PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(key.publicKey);
       Navigator.pushReplacement<void, void>(
         context,
@@ -213,10 +208,11 @@ class _SetupPageState extends State<SetupPage> {
             builder: (context) => SessionsPage(
               keyPair: key,
               //pkeyMetadata: metadata,
-              password: 'johndoe'),
+              password: _password),
           ),
       );
-      setState(() => _isLoading = false);
+      //_isFinished = true;
+      //setState(() => _isLoading = false);
     });
   }
 
@@ -232,16 +228,42 @@ class _SetupPageState extends State<SetupPage> {
     );
   }
 
+  String ?_validateName() {
+    if (_name.length == 0) return 'Name can\'t be empty';
+    if (_name.length > 64) return 'Name is too long';
+    final nameRegex = RegExp(r'^[\w\.\s-]+$');
+    if (!nameRegex.hasMatch(_name)) return 'Name must not contain numbers or special characters';
+
+    return null;
+  }
+  String ?_validateEmail() {
+    if (_email.length == 0) return 'Email can\'t be empty';
+    final emailRegex = RegExp(r'^[\w\.-]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (!emailRegex.hasMatch(_email)) return 'Please enter a valid email';
+    return null;
+  }
+  String ?_validatePassword() {
+    if (_password.length == 0) return 'Password must at least be 8 characters';
+    final passwordRegex = RegExp(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$');
+    if (!passwordRegex.hasMatch(_password)) return 'Password must contain atleast one letter, one number and one special character';
+    return null;
+  }
+
+  String ?_errorTextName = null;
+  String ?_errorTextEmail = null;
+  String ?_errorTextPassword = null;
   inputField(context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TextField(
           onChanged: (String value) {
-            _name = value; 
+            _name = value;
+            setState(() => _errorTextName = _validateName());
           },
           decoration: InputDecoration(
               hintText: "Name",
+              errorText: _errorTextName,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none
@@ -253,9 +275,11 @@ class _SetupPageState extends State<SetupPage> {
         TextField(
           onChanged: (String value) {
             _email = value; 
+            setState(() => _errorTextEmail = _validateEmail());
           },
           decoration: InputDecoration(
               hintText: "Email",
+              errorText: _errorTextEmail,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none
@@ -267,10 +291,12 @@ class _SetupPageState extends State<SetupPage> {
         TextField(
           onChanged: (String value) {
             _password = value; 
+            setState(() => _errorTextPassword = _validatePassword());
           },
           obscureText: true,
           decoration: InputDecoration(
               hintText: "Password",
+              errorText: _errorTextPassword,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none
@@ -280,7 +306,12 @@ class _SetupPageState extends State<SetupPage> {
               prefixIcon: const Icon(Icons.password)),
         ), const SizedBox(height: 10),
         ElevatedButton.icon(
-          onPressed: () { if(!_isLoading) _onSubmit(); },
+          onPressed: () {
+            if (!(_validateEmail() == null &&
+                  _validateName() == null &&
+                  _validatePassword() == null)) return;
+            if(!_isLoading) _onSubmit();
+          },
           icon: _isLoading
             ? Container(
                 padding: const EdgeInsets.all(1.0),
@@ -306,6 +337,7 @@ class _SetupPageState extends State<SetupPage> {
 
   @override
   Widget build(BuildContext context) {
+    
     return Scaffold(
       body: Container(
         margin: const EdgeInsets.all(20),

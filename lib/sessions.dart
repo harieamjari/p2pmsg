@@ -21,7 +21,7 @@ class Session {
   final String name;
   final String keyFingerprint;
   void Function() ?onMessage;
-  P2PEndpointStatus status = P2PEndpointStatus.offline;
+  P2PEndpointStatus status;
 
   Socket ?socket;
 
@@ -37,7 +37,7 @@ class Session {
     return keyFingerprint;
   }
 
-  Session({required this.name, required this.keyFingerprint, this.socket})
+  Session({required this.name, required this.keyFingerprint, this.socket, this.status = P2PEndpointStatus.offline})
       : uuid = Uuid().v1();
 }
 
@@ -159,8 +159,6 @@ class _SessionPageState extends State<SessionPage> {
                   maxWidth: MediaQuery.sizeOf(context).width * 0.8),
               child: 
   Text(P2PQuotes[Random().nextInt(P2PQuotes.length)], style: TextStyle(fontStyle: FontStyle.italic)),
-//  Text(
-//                  'This might be the beginning of your legendary conversation with ${session.name}', style: TextStyle(fontStyle: FontStyle.italic)),
             ),
           ],
         ),
@@ -188,7 +186,6 @@ class _SessionPageState extends State<SessionPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          //backgroundColor: Theme.of(context).colorScheme.inversePrimary,
           backgroundColor:
               Color(0xFFE83F6F), //Theme.of(context).colorScheme.inversePrimary,
           title: const Text('Session', style: TextStyle(color: Colors.white)),
@@ -259,10 +256,7 @@ class NewSessionPage extends StatefulWidget {
   State<NewSessionPage> createState() => _NewSessionPageState();
 }
 
-// Discovers _p2pmsg._tcp services
 class _NewSessionPageState extends State<NewSessionPage> {
-  //final BonsoirDiscovery discovery = BonsoirDiscovery(type: '_p2pmsg._tcp');
-
   bool _newAdded = false;
 
   String _yubiSplit(String? s) {
@@ -283,7 +277,6 @@ class _NewSessionPageState extends State<NewSessionPage> {
     return Card(
       child: ListTile(
         onTap: () {
-          //_onTap(widget.p2pService.services[index]);
           BonsoirService service = widget.p2pService.services[index];
           String name = _yubiSplit(service.name);
           if (widget.sessions.containsKey(name))
@@ -294,6 +287,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
             widget.sessions.addAll(<String, Session>{
               '${name}': Session(
                 name: service.attributes['userName'] ?? '',
+                status: P2PEndpointStatus.online,
                 keyFingerprint: name,
               )
             });
@@ -342,8 +336,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
 
   @override
   dispose() {
-    super.dispose();
     widget.p2pService.onDiscoveryState = null;
+    super.dispose();
   }
 
   @override
@@ -468,13 +462,16 @@ class _SessionsPageState extends State<SessionsPage> {
         title: Text(session.name),
         subtitle: Text('fingerprint: ' + session.keyFingerprint),
         trailing: Icon(Icons.arrow_forward),
-        leading: Icon(Icons.circle, color: (){
+        leading: Icon(Icons.circle,
+          color: (){
           switch(session.status){
             case P2PEndpointStatus.online: return Colors.yellow;
             case P2PEndpointStatus.offline: return Colors.grey;
             case P2PEndpointStatus.active: return Colors.green;
           }
-        }()) 
+        }(),
+          size: 12.0,
+        ), 
       ),
     );
   }
@@ -551,7 +548,6 @@ class _SessionsPageState extends State<SessionsPage> {
       ),
       body: _bodyBuilder(context),
       floatingActionButton: FloatingActionButton(
-        //onPressed: newSession,
         onPressed: () async {
           if (_isLoading) {
             ScaffoldMessenger.of(context)

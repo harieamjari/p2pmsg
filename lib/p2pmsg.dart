@@ -1,31 +1,26 @@
 /* p2pmsg.dart - core p2p protocol */
 
 //  Session handshake message format.
+//
+//  All integers in network byte order.
+//
 //  Clients initiates connection with the following tcp message.
+//
+//  Handshake format:
 //
 //  Size      |  Field
 //  4 bytes   |  The string "P2GP"
 //  4 bytes   | Whole message length
 //  8 bytes   |  Unix epoch in seconds
-//  4 bytes   | Destination keyId length
+//  4 bytes   | dstKeyFingerprint  length
 //  ......    | dstKeyFingerprint
 //  4 bytes   | PGP pkey length
 //  ......    | PGP pkey
 //  4 bytes   | PGP signature length
-//  .......   | PGP signature of the above first 6 fields
+//  .......   | PGP signature of epoch+dstKeyFingerprint+pkey
 //
-//  All integers in big endian.
 //
-//  Message format (msgdec):
-//
-//  Size      |    Field
-//  8 bytes   | Unix epoch in seconds
-//  4 bytes   | Mimetype length
-//  ......    | Mimetype
-//  4 bytes   | Data length
-//  ......    | data
-//
-//  Message format (msgenc)
+//  Message format:
 //
 //  4 bytes   | The string "P2GM"
 //  4 bytes   | Whole message length
@@ -33,6 +28,15 @@
 //  .....     | encrypted data (see msgdec)
 //  4 bytes   | PGP signature length
 //  ....      | PGP signature
+//
+//  msgdec:
+//
+//  Size      |    Field
+//  8 bytes   | Unix epoch in seconds
+//  4 bytes   | Mimetype length
+//  ......    | Mimetype
+//  4 bytes   | Data length
+//  ......    | data
 
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
@@ -43,63 +47,8 @@ import 'dart:async';
 import 'utils.dart';
 import 'dart:io';
 
-int _UnixEpoch() {
-  return (DateTime.now().millisecondsSinceEpoch / 1000).toInt();
-}
-
-// Big endian
-int _list2Uint64(List<int> l) {
-  assert(l.length >= 8);
-  return (l[0] << 56) +
-      (l[1] << 48) +
-      (l[2] << 40) +
-      (l[3] << 32) +
-      (l[4] << 24) +
-      (l[5] << 16) +
-      (l[6] << 8) +
-      l[7];
-}
-
-int _list2Uint32(List<int> l) {
-  assert(l.length >= 4);
-  return (l[0] << 24) + (l[1] << 16) + (l[2] << 8) + l[3];
-}
-
-Uint8List _Uint32ToList(int i) {
-  Uint8List l = Uint8List(4);
-  l[0] = (i >> 24) & 255;
-  l[1] = (i >> 16) & 255;
-  l[2] = (i >> 8) & 255;
-  l[3] = i & 255;
-  return l;
-}
-
-Uint8List _Uint64ToList(int i) {
-  Uint8List l = Uint8List(8);
-  l[0] = (i >> 56) & 255;
-  l[1] = (i >> 48) & 255;
-  l[2] = (i >> 40) & 255;
-  l[3] = (i >> 32) & 255;
-  l[4] = (i >> 24) & 255;
-  l[5] = (i >> 16) & 255;
-  l[6] = (i >> 8) & 255;
-  l[7] = i & 255;
-  return l;
-}
 
 sealed class P2PMessage {}
-
-class _MessageHandshake extends P2PMessage {
-  final int timestamp;
-  final String publicKey;
-  final String dstKeyFingerprint;
-  final Uint8List signature;
-  _MessageHandshake(
-      {required this.timestamp,
-      required this.signature,
-      required this.publicKey,
-      required this.dstKeyFingerprint});
-}
 
 ///////////////////////////////////////////////
 
@@ -214,14 +163,14 @@ class _P2PSocket {
       print('parsin message');
 
       // Encrypted data
-      int encryptedLen = _list2Uint32(_buf);
+      int encryptedLen = P2PUtils.List2Uint32(_buf);
       _buf.removeRange(0, 4);
       Uint8List listEncrypted = Uint8List(encryptedLen);
       List.copyRange<int>(listEncrypted, 0, _buf, 0, encryptedLen);
       _buf.removeRange(0, encryptedLen);
 
       // Signature
-      int signatureLen = _list2Uint32(_buf);
+      int signatureLen = P2PUtils.List2Uint32(_buf);
       _buf.removeRange(0, 4);
       Uint8List listSignature = Uint8List(signatureLen);
       List.copyRange<int>(listSignature, 0, _buf, 0, signatureLen);
@@ -270,7 +219,7 @@ class _P2PSocket {
     }
     _buf.removeRange(0, 4);
 
-    _expectingLen = _list2Uint32(_buf);
+    _expectingLen = P2PUtils.List2Uint32(_buf);
     _buf.removeRange(0, 4);
     print('message ok expecting ${_expectingLen} bytes');
     if (_expectingLen > 8 * 1024) {
@@ -301,25 +250,26 @@ class _P2PSocket {
 
 
       // timestamp 64 bit (network order)
-      int timestamp = _list2Uint64(_buf);
+      int timestamp = P2PUtils.List2Uint64(_buf);
       HandshakeBlob.add(P2PUtils.Uint64ToList(timestamp));
       _buf.removeRange(0, 8);
 
       // dstKeyFingerprint
-      int dstKeyFingerprintLen = _list2Uint32(_buf);
+      int dstKeyFingerprintLen = P2PUtils.List2Uint32(_buf);
       _buf.removeRange(0, 4);
       List<int> listKeyFingerprint = List<int>.filled(dstKeyFingerprintLen, 0);
       List.copyRange<int>(listKeyFingerprint, 0, _buf, 0, dstKeyFingerprintLen);
       if (String.fromCharCodes(listKeyFingerprint) != hostFingerprint){
         print('handshake dstFingerprint mismatch ${String.fromCharCodes(listKeyFingerprint)}');
         socket.destroy();
+        return;
       };
       HandshakeBlob.add(listKeyFingerprint);
       _buf.removeRange(0, dstKeyFingerprintLen);
 
       // Pkey
 
-      int pkeyLen = _list2Uint32(_buf);
+      int pkeyLen = P2PUtils.List2Uint32(_buf);
       _buf.removeRange(0, 4);
       List<int> listPkey = List<int>.filled(pkeyLen, 0);
       List.copyRange<int>(listPkey, 0, _buf, 0, pkeyLen);
@@ -329,7 +279,7 @@ class _P2PSocket {
       _buf.removeRange(0, pkeyLen);
 
       // Signature
-      int signatureLen = _list2Uint32(_buf);
+      int signatureLen = P2PUtils.List2Uint32(_buf);
       _buf.removeRange(0, 4);
       List<int> listSignature = List<int>.filled(signatureLen, 0);
       List.copyRange<int>(listSignature, 0, _buf, 0, signatureLen);
@@ -368,7 +318,7 @@ class _P2PSocket {
         });
       });
     } catch (e) {
-      print('parsing failure');
+      print('parsing failure ${e}');
       socket.destroy();
       return;
     }
@@ -395,7 +345,7 @@ class _P2PSocket {
     }
 
     _buf.removeRange(0, 4);
-    _expectingLen = _list2Uint32(_buf);
+    _expectingLen = P2PUtils.List2Uint32(_buf);
    // print('handshake successful expecting ${_expectingLen} bytes');
     // max 16kib
     if (_expectingLen > 16 * 1024) {
@@ -440,7 +390,7 @@ class _P2PSocket {
     // Send P2GP Message
     // Header
     BytesBuilder HandshakeBlob = BytesBuilder();
-    HandshakeBlob.add(_Uint64ToList(_UnixEpoch()));
+    HandshakeBlob.add(P2PUtils.Uint64ToList(P2PUtils.UnixEpoch()));
     HandshakeBlob.add(P2PUtils.String2List(endpointFingerprint));
     HandshakeBlob.add(P2PUtils.String2List(hostPkey));
     String sig = await _signBytesToString(HandshakeBlob.toBytes());
@@ -449,19 +399,19 @@ class _P2PSocket {
     BytesBuilder b = BytesBuilder();
 
 
-    b.add(_Uint64ToList(_UnixEpoch()));
+    b.add(P2PUtils.Uint64ToList(P2PUtils.UnixEpoch()));
 
-    b.add(_Uint32ToList(endpointFingerprint.length));
+    b.add(P2PUtils.Uint32ToList(endpointFingerprint.length));
     b.add(Uint8List.fromList(endpointFingerprint.codeUnits));
 
-    b.add(_Uint32ToList(hostPkey.length));
+    b.add(P2PUtils.Uint32ToList(hostPkey.length));
     b.add(Uint8List.fromList(hostPkey.codeUnits));
 
-    b.add(_Uint32ToList(sig.length));
+    b.add(P2PUtils.Uint32ToList(sig.length));
     b.add(Uint8List.fromList(sig.codeUnits));
 
     socket.add(<int>[80, 50, 71, 80]);
-    socket.add(_Uint32ToList(b.length));
+    socket.add(P2PUtils.Uint32ToList(b.length));
     socket.add(b.toBytes());
 
     //s.write("DITTOOODDNNCKWKDMNCKFKSKSMCMSKLWLW");
@@ -487,7 +437,7 @@ class _P2PSocket {
 //  ......    | data
     // plaintextBlob
     BytesBuilder plainBlob = BytesBuilder();
-    int timestamp = _UnixEpoch();
+    int timestamp = P2PUtils.UnixEpoch();
     plainBlob.add(P2PUtils.Uint64ToList(timestamp));
     plainBlob.add(P2PUtils.Uint32ToList(16));
     plainBlob.add(P2PUtils.String2List('application/text'));
@@ -513,6 +463,7 @@ class _P2PSocket {
     socket.add(encryptedBytes);
     socket.add(P2PUtils.Uint32ToList(sigBytes.length));
     socket.add(sigBytes);
+    socket.flush();
 //    sink.add(EventMessageText(timestamp: timestamp, senderFingerprint: hostFingerprint, messageText: message));
      
     return Future.value(true);
@@ -768,23 +719,6 @@ class MessageDecrypted {
       {required this.timestamp, required this.mimeType, required this.data});
 }
 
-// We store the encrypted message on the disk instead of
-// the plain MessageDecrypted.
-class EventMessageE extends P2PMessage {
-  final String senderFingerprint;
-  final Uint8List encrypted;
-  final Uint8List signature;
-
-  MessageDecrypted decrypt(String skey) {
-    return MessageDecrypted(
-      timestamp: 0,
-      mimeType: 'application/text',
-      data: encrypted,
-    );
-  }
-
-  EventMessageE({required this.signature, required this.encrypted, required this.senderFingerprint});
-}
 
 // Messages of Text Media or Pictures are supposedly to be encrypted
 
@@ -795,11 +729,33 @@ enum P2PMessageStatus {
 }
 
 class EventMessageText extends P2PMessage {
+  P2PMessageStatus messageStatus;
   final int timestamp;
   final String senderFingerprint;
   String messageText;
+  EventMessageText({
+    required this.messageStatus,
+    required this.timestamp,
+    required this.senderFingerprint,
+    required this.messageText,
+  });
+}
+
+class EventMessageFile extends P2PMessage {
   P2PMessageStatus messageStatus;
-  EventMessageText({required this.timestamp, required this.senderFingerprint, required this.messageText, required this.messageStatus});
+  final int timestamp;
+  final String senderFingerprint;
+  final String mimeType;
+  final String filename;
+  final Uint8List data;
+  EventMessageFile({
+    required this.messageStatus,
+    required this.timestamp,
+    required this.senderFingerprint,
+    required this.mimeType,
+    required this.filename,
+    required this.data,
+  });
 }
 
 class EventClientConnect extends P2PMessage {
