@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:openpgp/openpgp.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:encrypt/encrypt.dart' as encrypt;
+import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:typed_data';
 import 'utils.dart';
 import 'sessions.dart';
 import 'settings.dart';
@@ -12,33 +15,52 @@ import 'settings.dart';
 
 // Generate pgp keys for new users, else get password
 // to decrypt pgp key
+
+enum SetupState {
+  stateNew,
+  stateLogin,
+  stateLoading,
+}
+
 class SetupPage extends StatefulWidget {
   const SetupPage({super.key});
-  final secureStorage = FlutterSecureStorage();
 
   @override
   State<SetupPage> createState() => _SetupPageState();
 }
 
 class _SetupPageState extends State<SetupPage> {
+  final _secureStorage = const FlutterSecureStorage();
   String _name = '';
   String _email = '';
   String _password = '';
+  String _b64Key = '';
+  String _b64IV = '';
   bool _isLoading = false;
+  SetupState _state = SetupState.stateLoading;
   //bool _isFinished = false;
 
-
-  void _onSubmit() {
+  @override
+  initState(){
+    super.initState();
+  }
+  void _onSubmit() async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
     var keyOptions = KeyOptions()..rsaBits = 4096;
-    final keyPair = OpenPGP.generate(
+    final keyPair = await OpenPGP.generate(
       options: Options()
         ..name = _name
         ..email = _email
         ..passphrase = _password
         ..keyOptions = keyOptions
     );
+    // 256 bit key
+    final key = encrypt.Key(Uint8List.fromList(sha256.convert(_password.codeUnits).bytes));
+    final iv = encrypt.IV.fromLength(16);
+    final encrypted = encrypt.Encrypter(encrypt.AES(key)).encrypt(keyPair.privateKey, iv: iv);
+    await _secureStorage.write(key: 'secretKey', value: encrypted.base64);
+    await _secureStorage.write(key: 'iv', value: iv.base64);
 //// Dummy pgp key
 //    var keyPair = Future<KeyPair>.value(KeyPair(
 //    '''
@@ -198,22 +220,19 @@ class _SetupPageState extends State<SetupPage> {
 //=VLKT
 //-----END PGP PRIVATE KEY BLOCK-----
 //'''));
-    keyPair.then((key) async {
-      //print(key.publicKey);
-      //print(key.privateKey);
-      PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(key.publicKey);
-      Navigator.pushReplacement<void, void>(
-        context,
-          MaterialPageRoute<void>(
-            builder: (context) => SessionsPage(
-              keyPair: key,
-              //pkeyMetadata: metadata,
-              password: _password),
-          ),
-      );
-      //_isFinished = true;
-      //setState(() => _isLoading = false);
-    });
+    //print(key.publicKey);
+    //print(key.privateKey);
+    PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(keyPair.publicKey);
+    Navigator.pushReplacement<void, void>(
+      context,
+        MaterialPageRoute<void>(
+          builder: (context) => SessionsPage(
+            keyPair: keyPair,
+            password: _password),
+        ),
+    );
+    //_isFinished = true;
+    //setState(() => _isLoading = false);
   }
 
   header(context) {
@@ -228,10 +247,95 @@ class _SetupPageState extends State<SetupPage> {
     );
   }
 
+  String ?_errorTextName = null;
+  String ?_errorTextEmail = null;
+  String ?_errorTextPassword = null;
+
+  headerLogin(context) {
+    return Column(
+      children: [
+        Text(
+          "Login",
+          style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+  }
+  inputFieldLogin(context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          onChanged: (String value) {
+            _password = value; 
+            setState(() => _errorTextPassword = _validatePassword());
+          },
+          obscureText: true,
+          decoration: InputDecoration(
+              hintText: "Password",
+              errorText: _errorTextPassword,
+              errorMaxLines: 3,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: BorderSide.none
+              ),
+              fillColor: Color(0xFFFFBF00).withOpacity(0.1),
+              filled: true,
+              prefixIcon: const Icon(Icons.password)),
+        ), const SizedBox(height: 10),
+        ElevatedButton.icon(
+          onPressed: () async {
+            if (_validatePassword() != null) return;
+            if(_isLoading) return;
+            setState(() => _isLoading = true);
+            final key = encrypt.Key(Uint8List.fromList(sha256.convert(_password.codeUnits).bytes));
+            final iv = encrypt.IV.fromBase64(_b64IV);
+            try {
+              final String secretKey = encrypt.Encrypter(encrypt.AES(key)).decrypt(encrypt.Encrypted.fromBase64(_b64Key), iv: iv);
+              final KeyPair keyPair = KeyPair(await OpenPGP.convertPrivateKeyToPublicKey(secretKey), secretKey);
+              PublicKeyMetadata metadata = await OpenPGP.getPublicKeyMetadata(keyPair.publicKey);
+              Navigator.pushReplacement<void, void>(
+                context,
+                  MaterialPageRoute<void>(
+                    builder: (context) => SessionsPage(
+                      keyPair: keyPair,
+                      password: _password),
+                  ),
+              )
+            } catch (e) {
+              setState((){
+                _isLoading = false;
+                _errorTextPassword = 'Invalid password';
+              });
+            } // catch
+          },
+          icon: _isLoading
+            ? Container(
+                padding: const EdgeInsets.all(1.0),
+                child: const CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 3,
+                ),
+              )
+            : const Icon(Icons.key, color: Colors.white),
+          style: ElevatedButton.styleFrom(
+            shape: const StadiumBorder(),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            backgroundColor: Color(0xFFE83F6F),
+          ),
+          label: const Text(
+            "Decrypt key",
+            style: TextStyle(fontSize: 20, color: Colors.white),
+          ),
+        ),
+      ],
+    );
+  }
+
   String ?_validateName() {
     if (_name.length == 0) return 'Name can\'t be empty';
     if (_name.length > 64) return 'Name is too long';
-    final nameRegex = RegExp(r'^[\w\.\s-]+$');
+    final nameRegex = RegExp(r'^[A-Za-z\ \.-]+$');
     if (!nameRegex.hasMatch(_name)) return 'Name must not contain numbers or special characters';
 
     return null;
@@ -245,13 +349,9 @@ class _SetupPageState extends State<SetupPage> {
   String ?_validatePassword() {
     if (_password.length == 0) return 'Password must at least be 8 characters';
     final passwordRegex = RegExp(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$');
-    if (!passwordRegex.hasMatch(_password)) return 'Password must contain atleast one letter, one number and one special character';
+    if (!passwordRegex.hasMatch(_password)) return 'Must contain atleast one letter, one number and one special character';
     return null;
   }
-
-  String ?_errorTextName = null;
-  String ?_errorTextEmail = null;
-  String ?_errorTextPassword = null;
   inputField(context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -297,6 +397,7 @@ class _SetupPageState extends State<SetupPage> {
           decoration: InputDecoration(
               hintText: "Password",
               errorText: _errorTextPassword,
+              errorMaxLines: 3,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none
@@ -335,9 +436,7 @@ class _SetupPageState extends State<SetupPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    
+  _stateNew(context) {
     return Scaffold(
       body: Container(
         margin: const EdgeInsets.all(20),
@@ -354,5 +453,70 @@ class _SetupPageState extends State<SetupPage> {
         ),
       ), // container
     );
+
+  }
+
+  _stateLogin(context) {
+    return Scaffold(
+      body: Container(
+        margin: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: AnimateList(
+            interval: 400.ms,
+            effects: [FadeEffect(duration: 400.ms)],
+            children: [
+              headerLogin(context),
+              inputFieldLogin(context),
+            ],
+          ),
+        ),
+      ), // container
+    );
+
+  }
+
+  _stateLoading(context) {
+    return Scaffold(
+      body: Container(
+        margin: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: AnimateList(
+            interval: 200.ms,
+            effects: [FadeEffect(duration: 400.ms)],
+            children: [
+              CircularProgressIndicator(),
+            ],
+          ),
+        ),
+      ), // container
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _secureStorage.read(key: 'secretKey').then((String ?b64) async {
+      if (_state != SetupState.stateLoading) return;
+      if (b64 == null) {
+        setState(() => _state = SetupState.stateNew);
+        return;
+      }
+      _b64Key = b64!;
+      String ?temp = await _secureStorage.read(key: 'iv');
+      assert(temp != null);
+      _b64IV = temp!;
+      // User has already registered, now login,
+      setState(() => _state = SetupState.stateLogin);
+    });
+    
+    switch (_state) {
+      case SetupState.stateLoading:
+        return _stateLoading(context);
+      case SetupState.stateNew:
+        return _stateNew(context);
+      case SetupState.stateLogin:
+        return _stateLogin(context);
+    }
   }
 }
