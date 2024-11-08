@@ -251,16 +251,6 @@ class _SetupPageState extends State<SetupPage> {
   String ?_errorTextEmail = null;
   String ?_errorTextPassword = null;
 
-  headerLogin(context) {
-    return Column(
-      children: [
-        Text(
-          "Login",
-          style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold),
-        ),
-      ],
-    );
-  }
   inputFieldLogin(context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -268,13 +258,12 @@ class _SetupPageState extends State<SetupPage> {
         TextField(
           onChanged: (String value) {
             _password = value; 
-            setState(() => _errorTextPassword = _validatePassword());
+            setState(() => _errorTextPassword = _validateLoginPassword());
           },
           obscureText: true,
           decoration: InputDecoration(
               hintText: "Password",
               errorText: _errorTextPassword,
-              errorMaxLines: 3,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none
@@ -285,7 +274,7 @@ class _SetupPageState extends State<SetupPage> {
         ), const SizedBox(height: 10),
         ElevatedButton.icon(
           onPressed: () async {
-            if (_validatePassword() != null) return;
+            if (_validateLoginPassword() != null) return;
             if(_isLoading) return;
             setState(() => _isLoading = true);
             final key = encrypt.Key(Uint8List.fromList(sha256.convert(_password.codeUnits).bytes));
@@ -301,7 +290,7 @@ class _SetupPageState extends State<SetupPage> {
                       keyPair: keyPair,
                       password: _password),
                   ),
-              )
+              );
             } catch (e) {
               setState((){
                 _isLoading = false;
@@ -347,9 +336,13 @@ class _SetupPageState extends State<SetupPage> {
     return null;
   }
   String ?_validatePassword() {
-    if (_password.length == 0) return 'Password must at least be 8 characters';
-    final passwordRegex = RegExp(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$');
-    if (!passwordRegex.hasMatch(_password)) return 'Must contain atleast one letter, one number and one special character';
+    if (_password.length == 0) return 'Password can\'t be empty';
+//    final passwordRegex = RegExp(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$');
+//    if (!passwordRegex.hasMatch(_password)) return 'Must contain atleast one letter, one number and one special character';
+    return null;
+  }
+  String ?_validateLoginPassword() {
+    if (_password.length == 0) return 'Password can\'t be empty';
     return null;
   }
   inputField(context) {
@@ -466,7 +459,7 @@ class _SetupPageState extends State<SetupPage> {
             interval: 400.ms,
             effects: [FadeEffect(duration: 400.ms)],
             children: [
-              headerLogin(context),
+//              headerLogin(context),
               inputFieldLogin(context),
             ],
           ),

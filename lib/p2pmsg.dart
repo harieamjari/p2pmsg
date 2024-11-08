@@ -47,20 +47,27 @@ import 'dart:async';
 import 'utils.dart';
 import 'dart:io';
 
+import 'settings.dart';
 
 sealed class P2PMessage {}
 
 ///////////////////////////////////////////////
 
-enum EndpointType {
+enum _EndpointType {
   server,
   client,
+}
+
+enum P2PEndpointStatus {
+  active,
+  online,
+  offline,
 }
 
 class _P2PSocket {
   final Socket socket;
   final KeyPair keyPair;
-  final EndpointType endpointType;
+  final _EndpointType endpointType;
   final String Function() getPass;
 
   Map<String, _P2PSocket> activeClients;
@@ -97,6 +104,11 @@ class _P2PSocket {
 
   Future<Uint8List> _decryptBytes(Uint8List blob) async {
     return await OpenPGP.decryptBytes(blob, keyPair.privateKey, getPass());
+  }
+
+  Future<bool> destroy() {
+    socket.destroy();
+    return Future.value(false);
   }
 
   void _onDone() {
@@ -211,7 +223,7 @@ class _P2PSocket {
       print('invalid message header');
       return;
     }
-    if (endpointType == EndpointType.client && !isAcked) {
+    if (endpointType == _EndpointType.client && !isAcked) {
       print('endpoint was trying to send message before ACKP');
       msgSentBeforeAck = true;
       socket.destroy();
@@ -293,7 +305,7 @@ class _P2PSocket {
           socket.destroy();
           return;
         }
-        if (endpointType == EndpointType.client) _sendHandshake();
+        if (endpointType == _EndpointType.client) _sendHandshake();
         OpenPGP.getPublicKeyMetadata(endpointPkey).then((PublicKeyMetadata meta) {  
           endpointPkeyMeta = meta;
           endpointFingerprint = P2PUtils.fingerprintToHex(meta.fingerprint);
@@ -302,7 +314,7 @@ class _P2PSocket {
                 keyFingerprint: endpointFingerprint, socket: socket));
           activeClients.addAll(<String, _P2PSocket>{endpointFingerprint:this});
           print('event ClientConnect added');
-          if (endpointType == EndpointType.client && msgSentBeforeAck) {
+          if (endpointType == _EndpointType.client && msgSentBeforeAck) {
             sink.add(EventClientDisconnect(
               timestamp: P2PUtils.UnixEpoch(), keyFingerprint: endpointFingerprint));
             print('event ClientDisconnect added. note before ackp');
@@ -310,7 +322,7 @@ class _P2PSocket {
             return;
           }
           // write ACKP to client
-          if (endpointType == EndpointType.client) {
+          if (endpointType == _EndpointType.client) {
             socket.add(<int>[65, 67, 75, 80]);
             socket.flush();
             isAcked = true;
@@ -331,7 +343,7 @@ class _P2PSocket {
     _buf.addAll(data);
     // Wait until we have received  "P2GP" + uint32 handshake message length
     if (_buf.length < 8) return;
-    print('Doing handshake to client');
+    print('Doing handshake to endpoint ${endpointType}');
 
     // Check header (theres probably more efficient way)
     if (!(_buf[0] == 80 && // P
@@ -340,7 +352,8 @@ class _P2PSocket {
         _buf[3] == 80)) {
       if (onClose != null) onClose!(socket);
       socket.destroy();
-      print('handshake failed');
+      print('handshake failed, malformed handshake header ${endpointType}');
+      print(_buf);
       return;
     }
 
@@ -369,9 +382,11 @@ class _P2PSocket {
         _buf[2] == 75 && // K
         _buf[3] == 80)) { // P
       print('malformed ACKP');
+      print(_buf);
       socket.destroy();
       return;
     }
+    _buf.removeRange(0, 4);
     print('Recevied ACKP');
 
     streamSub.onData(_doHandshake);
@@ -389,8 +404,9 @@ class _P2PSocket {
 //  .......   | PGP signature of the above first 6 fields
     // Send P2GP Message
     // Header
+    int epoch = P2PUtils.UnixEpoch();
     BytesBuilder HandshakeBlob = BytesBuilder();
-    HandshakeBlob.add(P2PUtils.Uint64ToList(P2PUtils.UnixEpoch()));
+    HandshakeBlob.add(P2PUtils.Uint64ToList(epoch));
     HandshakeBlob.add(P2PUtils.String2List(endpointFingerprint));
     HandshakeBlob.add(P2PUtils.String2List(hostPkey));
     String sig = await _signBytesToString(HandshakeBlob.toBytes());
@@ -399,7 +415,7 @@ class _P2PSocket {
     BytesBuilder b = BytesBuilder();
 
 
-    b.add(P2PUtils.Uint64ToList(P2PUtils.UnixEpoch()));
+    b.add(P2PUtils.Uint64ToList(epoch));
 
     b.add(P2PUtils.Uint32ToList(endpointFingerprint.length));
     b.add(Uint8List.fromList(endpointFingerprint.codeUnits));
@@ -416,6 +432,7 @@ class _P2PSocket {
 
     //s.write("DITTOOODDNNCKWKDMNCKFKSKSMCMSKLWLW");
     socket.flush();
+    print('handshake sent');
   }
 
 //  void _onData(Uint8List data) {
@@ -477,7 +494,7 @@ class _P2PSocket {
       required this.activeClients,
       required this.sink,
       this.onClose})
-      : endpointType = EndpointType.client,
+      : endpointType = _EndpointType.client,
         hostPkey = keyPair.publicKey {
     hostFingerprint = P2PUtils.fingerprintToHex(hostPkeyMeta.fingerprint);
     streamSub = socket.listen(_doHandshake, onDone: _onDone);
@@ -491,7 +508,7 @@ class _P2PSocket {
       required this.activeClients,
       required this.sink,
       this.onClose})
-      : endpointType = EndpointType.server,
+      : endpointType = _EndpointType.server,
         hostPkey = keyPair.publicKey {
     _sendHandshake();
     hostFingerprint = P2PUtils.fingerprintToHex(hostPkeyMeta.fingerprint);
@@ -552,7 +569,7 @@ class P2PService {
     return Future.value(true);
   }
 
-  P2PService({this.port = 6573, required this.keyPair, required this.password})
+  P2PService({this.port = P2PSettings.port, required this.keyPair, required this.password})
    :  _streamController = StreamController(),
       serverPkey = keyPair.publicKey,
       serverSkey = keyPair.privateKey
@@ -634,12 +651,23 @@ class P2PService {
     serverBroadcast?.stop();
   }
 
+  // Kills the active connection associated with keyFingerprint.
+  // returns false if succes.s
+  Future<bool> destroy(String keyFingerprint) async {
+    if (!_activeClients.containsKey(keyFingerprint)) {
+      print('no such active client with ${keyFingerprint}');
+      return Future.value(true);
+    }
+    
+    _P2PSocket p2p = _activeClients[keyFingerprint]!;
+    return await p2p.destroy();
+  }
 
   // returns 0, (false) if success
   Future<bool> connect(
       {required String address,
       required String keyFingerprint,
-      int port = 6574}) async {
+      int port = P2PSettings.port}) async {
     try {
       Socket server = await Socket.connect(address, port);
       print('Manually connected');
@@ -691,7 +719,7 @@ class P2PService {
         'uuid': Uuid().v1(),
       }
     );
-    _server = await ServerSocket.bind(InternetAddress.anyIPv4, 6573);
+    _server = await ServerSocket.bind(InternetAddress.anyIPv4, P2PSettings.port);
     // Start serving clients. If anyone connects, begin handshake
     _server.listen(_onClient);
     await discovery.ready;
@@ -699,11 +727,11 @@ class P2PService {
     await discovery.start();
   }
 
-  // returns true if it failed
+  // returns false if success
   Future<bool> SendMessageText(String fingerprint, String message) async {
     if (!_activeClients.containsKey(fingerprint)) {
       print('no such active client with ${fingerprint}');
-      return Future.value(false);
+      return Future.value(true);
     }
     
     _P2PSocket p2p = _activeClients[fingerprint]!;

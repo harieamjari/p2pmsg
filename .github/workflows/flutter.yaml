@@ -17,10 +17,9 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
+
   build_android:
     runs-on: ubuntu-latest
-
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
@@ -50,9 +49,33 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_APK }}
           path: build/app/outputs/flutter-apk
+
+  build_windows:
+    runs-on: windows-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.19.0
+
+      - run: flutter upgrade
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter build windows
+
+      - name: Prepare upload
+        run: |
+          echo "ARTIFACT_WINDOWS=p2pmsg-windows-$(date -I)-$(date +%s)" >> $GITHUB_ENV
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-windows
+          path: build/windows/x64/runner/Release/
+
   build_web:
     runs-on: ubuntu-latest
-
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
@@ -97,4 +120,3 @@ jobs:
         #        with:
           #          artifact_name: ${{ needs.build_web.outputs.ARTIFACT_WEB }}
           #token: ${{ secrets.DEPLOY_TOKEN }}
-
