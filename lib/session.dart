@@ -18,7 +18,7 @@ class Session {
   P2PEndpointStatus status;
 
   // Are they online?
-  bool isBroadcast = false;
+  bool isOnline = false;
 
   Socket ?socket;
 
@@ -235,8 +235,8 @@ class _SessionPageState extends State<SessionPage> {
                       messageText = '';
                       widget.session.messages.insert(0, ev);
                     });
-                    widget.p2pService.SendMessageText(widget.session.keyFingerprint, tempMsg).then((bool isSent){
-                        setState(() {ev.messageStatus = (isSent ? P2PMessageStatus.sent : P2PMessageStatus.failed);});
+                    widget.p2pService.SendMessageText(widget.session.keyFingerprint, tempMsg).then((bool isFailed){
+                        setState(() {ev.messageStatus = (isFailed ? P2PMessageStatus.failed : P2PMessageStatus.sent);});
                     });
                     _scrollDown(); 
                   }),

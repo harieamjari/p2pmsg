@@ -18,7 +18,18 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
 
+  setup_variables:
+    runs-on: ubuntu-latest
+    outputs:
+      ARTIFACT_WINDOWS: ${{ steps.geno.outputs.ARTIFACT_WINDOWS}}
+      ARTIFACT_APK: ${{ steps.geno.outputs.ARTIFACT_APK}}
+    steps:
+      - id: geno
+        run: |
+          echo "ARTIFACT_APK=p2pmsg-apk-$(date -I)-$(date +%s)" >> $GITHUB_OUTPUT
+          echo "ARTIFACT_WINDOWS=p2pmsg-windows-$(date -I)-$(date +%s)" >> $GITHUB_OUTPUT
   build_android:
+    needs: [setup_variables]
     runs-on: ubuntu-latest
     steps:
       - name: Clone repository
@@ -34,23 +45,20 @@ jobs:
         with:
           java-version: 17
           distribution: "temurin"
-        # - run: sudo apt install openjdk-17-jdk
 
       - run: flutter upgrade
       - run: flutter pub get
       - run: flutter test
       - run: flutter build apk
 
-      - name: Prepare upload
-        run: |
-          echo "ARTIFACT_APK=p2pmsg-apk-$(date -I)-$(date +%s)" >> $GITHUB_ENV
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_APK }}
+          name: ${{ needs.setup_variables.outputs.ARTIFACT_APK }}
           path: build/app/outputs/flutter-apk
 
   build_windows:
+    needs: [setup_variables]
     runs-on: windows-latest
     steps:
       - name: Clone repository
@@ -65,13 +73,10 @@ jobs:
       - run: flutter test
       - run: flutter build windows
 
-      - name: Prepare upload
-        run: |
-          echo "ARTIFACT_WINDOWS=p2pmsg-windows-$(date -I)-$(date +%s)" >> $GITHUB_ENV
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: artifact-windows
+          name: ${{ needs.setup_variables.outputs.ARTIFACT_WINDOWS }}
           path: build/windows/x64/runner/Release/
 
   build_web:

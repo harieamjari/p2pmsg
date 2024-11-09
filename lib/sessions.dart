@@ -84,14 +84,22 @@ class _SessionsPageState extends State<SessionsPage> {
        break;
      case EventClientDisconnect(timestamp: int timestamp, keyFingerprint: String keyFingerprint):
         if (!sessions.containsKey(keyFingerprint)) return;
-        sessions[keyFingerprint]!.status = P2PEndpointStatus.online; 
+         setState((){sessions[keyFingerprint]!.status = sessions[keyFingerprint]!.isOnline ? P2PEndpointStatus.online : P2PEndpointStatus.offline;}); 
        break;
      case EventClientOnline(keyFingerprint: String keyFingerprint):
-       if (sessions.containsKey(keyFingerprint))
+       if (!sessions.containsKey(keyFingerprint))
+         return;
+       sessions[keyFingerprint]!.isOnline = true;
+       if (sessions[keyFingerprint]!.status != P2PEndpointStatus.active)
          setState((){sessions[keyFingerprint]!.status = P2PEndpointStatus.online;});
+       
        break;
      case EventClientOffline(keyFingerprint: String keyFingerprint):
-       if (sessions.containsKey(keyFingerprint))
+       if (!sessions.containsKey(keyFingerprint))
+         return;
+       sessions[keyFingerprint]!.isOnline = false;
+       // maybe they have just changed their visibility.
+       if (sessions[keyFingerprint]!.status != P2PEndpointStatus.active)
          setState((){sessions[keyFingerprint]!.status = P2PEndpointStatus.offline;});
        break;
      default:;
@@ -110,12 +118,12 @@ class _SessionsPageState extends State<SessionsPage> {
             String ?address = widget.p2pService.resolve(session.keyFingerprint);
             if (address != null)
               widget.p2pService.connect(keyFingerprint: session.keyFingerprint, address: address!).then((b){
-                if (!b)
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content: Text('connected to ${session.keyFingerprint}:${address!}')));
-                else 
+                if (b)
                   ScaffoldMessenger.of(context)
                       .showSnackBar(SnackBar(content: Text('connection failed')));
+                else 
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text('connected to ${session.keyFingerprint}:${address!}')));
               });
           }
           Navigator.push(

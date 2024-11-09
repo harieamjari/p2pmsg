@@ -96,8 +96,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
 
   @override
   initState() {
-    widget.p2pService.onDiscoveryState = _onDiscovery;
     super.initState();
+    widget.p2pService.onDiscoveryState = _onDiscovery;
   }
 
   @override
