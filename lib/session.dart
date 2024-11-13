@@ -226,7 +226,7 @@ class _SessionPageState extends State<SessionPage> {
                     textController.clear();
                     var tempMsg = messageText;
                     EventMessageText ev = EventMessageText(
-                      timestamp: P2PUtils.UnixEpoch(),
+                      timestamp: P2PUtils.unixEpoch(),
                       senderFingerprint: widget.p2pService.serverFingerprint,
                       messageText: tempMsg,
                       messageStatus: P2PMessageStatus.sending,

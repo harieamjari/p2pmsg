@@ -3,6 +3,30 @@ import 'dart:async';
 import 'dart:io';
 
 class P2PUtils {
+  // reads 32 bit length prefixed field then seeks it.
+  static Uint8List read32Field(List <int> l) {
+    int fieldLen = list2Uint32(l);
+    l.removeRange(0, 4);
+    Uint8List field = Uint8List(fieldLen);
+    List.copyRange<int>(field, 0, l, 0, fieldLen);
+    l.removeRange(0, fieldLen);
+    return field;
+  }
+
+  // reads uint32 field
+  static int readU32Int(List <int> l) {
+    int ret = list2Uint32(l);
+    l.removeRange(0, 4);
+    return ret;
+  } 
+
+  // reads uint64 field
+  static int readU64Int(List <int> l) {
+    int ret = list2Uint64(l);
+    l.removeRange(0, 8);
+    return ret;
+  } 
+
   static String List2String(Uint8List list){
     return String.fromCharCodes(list);
   }
@@ -22,12 +46,12 @@ class P2PUtils {
     return builder;
   }
 
-  static int UnixEpoch() {
+  static int unixEpoch() {
     return (DateTime.now().millisecondsSinceEpoch / 1000).toInt();
   }
   
   // Big endian
-  static int List2Uint64(List<int> l) {
+  static int list2Uint64(List<int> l) {
     assert(l.length >= 8);
     return (l[0] << 56) +
         (l[1] << 48) +
@@ -39,12 +63,12 @@ class P2PUtils {
         l[7];
   }
   
-  static int List2Uint32(List<int> l) {
+  static int list2Uint32(List<int> l) {
     assert(l.length >= 4);
     return (l[0] << 24) + (l[1] << 16) + (l[2] << 8) + l[3];
   }
   
-  static Uint8List Uint32ToList(int i) {
+  static Uint8List uint32ToList(int i) {
     Uint8List l = Uint8List(4);
     l[0] = (i >> 24) & 255;
     l[1] = (i >> 16) & 255;
@@ -53,7 +77,7 @@ class P2PUtils {
     return l;
   }
   
-  static Uint8List Uint64ToList(int i) {
+  static Uint8List uint64ToList(int i) {
     Uint8List l = Uint8List(8);
     l[0] = (i >> 56) & 255;
     l[1] = (i >> 48) & 255;

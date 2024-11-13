@@ -127,7 +127,7 @@ class _P2PSocket {
     if (msgSentBeforeAck) return;
     if (endpointPkey != '') {
       sink.add(EventClientDisconnect(
-          timestamp: P2PUtils.UnixEpoch(), keyFingerprint: endpointFingerprint));
+          timestamp: P2PUtils.unixEpoch(), keyFingerprint: endpointFingerprint));
       print('event Client Disconnect added on _onDone');
       activeClients.remove(_mKey());
     }
@@ -147,12 +147,12 @@ class _P2PSocket {
       buf.addAll(data);
   
       // timestamp
-      int timestamp = P2PUtils.List2Uint64(buf);
+      int timestamp = P2PUtils.list2Uint64(buf);
       buf.removeRange(0, 8);
       print('message timestamp ${timestamp}');
   
       // mimetype
-      int mimeTypeLen = P2PUtils.List2Uint32(buf);
+      int mimeTypeLen = P2PUtils.list2Uint32(buf);
       print('message mimetypeLen ${mimeTypeLen}');
       buf.removeRange(0, 4);
       Uint8List listMimeType = Uint8List(mimeTypeLen);
@@ -160,7 +160,7 @@ class _P2PSocket {
       buf.removeRange(0, mimeTypeLen);
   
       // data
-      int dataLen = P2PUtils.List2Uint32(buf);
+      int dataLen = P2PUtils.list2Uint32(buf);
       print('message datalen ${dataLen}');
       buf.removeRange(0, 4);
       Uint8List listData = Uint8List(dataLen);
@@ -186,14 +186,14 @@ class _P2PSocket {
       print('parsin message');
 
       // Encrypted data
-      int encryptedLen = P2PUtils.List2Uint32(_buf);
+      int encryptedLen = P2PUtils.list2Uint32(_buf);
       _buf.removeRange(0, 4);
       Uint8List listEncrypted = Uint8List(encryptedLen);
       List.copyRange<int>(listEncrypted, 0, _buf, 0, encryptedLen);
       _buf.removeRange(0, encryptedLen);
 
       // Signature
-      int signatureLen = P2PUtils.List2Uint32(_buf);
+      int signatureLen = P2PUtils.list2Uint32(_buf);
       _buf.removeRange(0, 4);
       Uint8List listSignature = Uint8List(signatureLen);
       List.copyRange<int>(listSignature, 0, _buf, 0, signatureLen);
@@ -242,7 +242,7 @@ class _P2PSocket {
     }
     _buf.removeRange(0, 4);
 
-    _expectingLen = P2PUtils.List2Uint32(_buf);
+    _expectingLen = P2PUtils.list2Uint32(_buf);
     _buf.removeRange(0, 4);
     print('message ok expecting ${_expectingLen} bytes');
     if (_expectingLen > 8 * 1024) {
@@ -273,12 +273,12 @@ class _P2PSocket {
 
 
       // timestamp 64 bit (network order)
-      int timestamp = P2PUtils.List2Uint64(_buf);
-      HandshakeBlob.add(P2PUtils.Uint64ToList(timestamp));
+      int timestamp = P2PUtils.list2Uint64(_buf);
+      HandshakeBlob.add(P2PUtils.uint64ToList(timestamp));
       _buf.removeRange(0, 8);
 
       // dstKeyFingerprint
-      int dstKeyFingerprintLen = P2PUtils.List2Uint32(_buf);
+      int dstKeyFingerprintLen = P2PUtils.list2Uint32(_buf);
       _buf.removeRange(0, 4);
       List<int> listKeyFingerprint = List<int>.filled(dstKeyFingerprintLen, 0);
       List.copyRange<int>(listKeyFingerprint, 0, _buf, 0, dstKeyFingerprintLen);
@@ -292,7 +292,7 @@ class _P2PSocket {
 
       // Pkey
 
-      int pkeyLen = P2PUtils.List2Uint32(_buf);
+      int pkeyLen = P2PUtils.list2Uint32(_buf);
       _buf.removeRange(0, 4);
       List<int> listPkey = List<int>.filled(pkeyLen, 0);
       List.copyRange<int>(listPkey, 0, _buf, 0, pkeyLen);
@@ -302,7 +302,7 @@ class _P2PSocket {
       _buf.removeRange(0, pkeyLen);
 
       // Signature
-      int signatureLen = P2PUtils.List2Uint32(_buf);
+      int signatureLen = P2PUtils.list2Uint32(_buf);
       _buf.removeRange(0, 4);
       List<int> listSignature = List<int>.filled(signatureLen, 0);
       List.copyRange<int>(listSignature, 0, _buf, 0, signatureLen);
@@ -329,7 +329,7 @@ class _P2PSocket {
           print('event ClientConnect added');
           if (endpointType == _EndpointType.client && msgSentBeforeAck) {
             sink.add(EventClientDisconnect(
-              timestamp: P2PUtils.UnixEpoch(), keyFingerprint: endpointFingerprint));
+              timestamp: P2PUtils.unixEpoch(), keyFingerprint: endpointFingerprint));
             print('event ClientDisconnect added. note before ackp');
             activeClients.remove(_mKey);
             return;
@@ -371,7 +371,7 @@ class _P2PSocket {
     }
 
     _buf.removeRange(0, 4);
-    _expectingLen = P2PUtils.List2Uint32(_buf);
+    _expectingLen = P2PUtils.list2Uint32(_buf);
    // print('handshake successful expecting ${_expectingLen} bytes');
     // max 16kib
     if (_expectingLen > 16 * 1024) {
@@ -417,14 +417,14 @@ class _P2PSocket {
 //  .......   | PGP signature of the above first 6 fields
     // Send P2GP Message
     // Header
-    int epoch = P2PUtils.UnixEpoch();
+    int epoch = P2PUtils.unixEpoch();
     print('sending handshake');
     print('epoch $epoch');
     assert(endpointFingerprint != 0);
     print('efp $endpointFingerprint');
     print('hpk $hostPkey');
     BytesBuilder HandshakeBlob = BytesBuilder();
-    HandshakeBlob.add(P2PUtils.Uint64ToList(epoch));
+    HandshakeBlob.add(P2PUtils.uint64ToList(epoch));
     HandshakeBlob.add(P2PUtils.String2List(endpointFingerprint));
     HandshakeBlob.add(P2PUtils.String2List(hostPkey));
     print('Handshakeblob len $HandshakeBlob.toBytes().length');
@@ -435,20 +435,20 @@ class _P2PSocket {
     BytesBuilder b = BytesBuilder();
 
 
-    b.add(P2PUtils.Uint64ToList(epoch));
+    b.add(P2PUtils.uint64ToList(epoch));
     print('epoch after $epoch');
 
-    b.add(P2PUtils.Uint32ToList(endpointFingerprint.length));
+    b.add(P2PUtils.uint32ToList(endpointFingerprint.length));
     b.add(Uint8List.fromList(endpointFingerprint.codeUnits));
 
-    b.add(P2PUtils.Uint32ToList(hostPkey.length));
+    b.add(P2PUtils.uint32ToList(hostPkey.length));
     b.add(Uint8List.fromList(hostPkey.codeUnits));
 
-    b.add(P2PUtils.Uint32ToList(sig.length));
+    b.add(P2PUtils.uint32ToList(sig.length));
     b.add(Uint8List.fromList(sig.codeUnits));
 
     socket.add(<int>[80, 50, 71, 80]);
-    socket.add(P2PUtils.Uint32ToList(b.length));
+    socket.add(P2PUtils.uint32ToList(b.length));
     socket.add(b.toBytes());
 
     //s.write("DITTOOODDNNCKWKDMNCKFKSKSMCMSKLWLW");
@@ -475,11 +475,11 @@ class _P2PSocket {
 //  ......    | data
     // plaintextBlob
     BytesBuilder plainBlob = BytesBuilder();
-    int timestamp = P2PUtils.UnixEpoch();
-    plainBlob.add(P2PUtils.Uint64ToList(timestamp));
-    plainBlob.add(P2PUtils.Uint32ToList(16));
+    int timestamp = P2PUtils.unixEpoch();
+    plainBlob.add(P2PUtils.uint64ToList(timestamp));
+    plainBlob.add(P2PUtils.uint32ToList(16));
     plainBlob.add(P2PUtils.String2List('application/text'));
-    plainBlob.add(P2PUtils.Uint32ToList(message.length));
+    plainBlob.add(P2PUtils.uint32ToList(message.length));
     plainBlob.add(P2PUtils.String2List(message));
 
     Uint8List encryptedBytes = await _encryptBytes(plainBlob.toBytes());
@@ -496,10 +496,10 @@ class _P2PSocket {
 //  4 bytes   | PGP signature length
 //  ....      | PGP signature
     socket.add(<int>[80,50,71,77]);
-    socket.add(P2PUtils.Uint32ToList(4+4 + encryptedBytes.length + sigBytes.length));
-    socket.add(P2PUtils.Uint32ToList(encryptedBytes.length));
+    socket.add(P2PUtils.uint32ToList(4+4 + encryptedBytes.length + sigBytes.length));
+    socket.add(P2PUtils.uint32ToList(encryptedBytes.length));
     socket.add(encryptedBytes);
-    socket.add(P2PUtils.Uint32ToList(sigBytes.length));
+    socket.add(P2PUtils.uint32ToList(sigBytes.length));
     socket.add(sigBytes);
     socket.flush();
 //    sink.add(EventMessageText(timestamp: timestamp, senderFingerprint: hostFingerprint, messageText: message));
@@ -731,7 +731,7 @@ class P2PService {
     await isInit;
     _serverService = BonsoirService(
       name: P2PUtils.fingerprintToHex(serverPkeyMeta.fingerprint) +
-           '-' + P2PUtils.UnixEpoch().toRadixString(16),
+           '-' + P2PUtils.unixEpoch().toRadixString(16),
       type: '_p2pmsg._tcp',
       port: port,
       attributes: {
