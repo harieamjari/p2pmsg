@@ -452,9 +452,10 @@ class _SetupPageState extends State<SetupPage> {
   _stateLogin(context) {
     return Scaffold(
       body: Container(
-        margin: const EdgeInsets.all(20),
+        //margin: const EdgeInsets.all(20),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: AnimateList(
             interval: 400.ms,
             effects: [FadeEffect(duration: 400.ms)],

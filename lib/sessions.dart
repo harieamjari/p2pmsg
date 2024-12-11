@@ -5,13 +5,15 @@ import 'package:openpgp/openpgp.dart';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/rendering.dart';
-import 'sessions.dart';
 
+import 'sessions.dart';
+import 'session.dart';
 import 'p2pmsg.dart';
 import 'utils.dart';
 
-import 'session.dart';
 import 'new_session.dart';
+
+import 'drawer/sessions.dart';
 
 class SessionsPage extends StatefulWidget {
   // NOTE: must be in a secure memory to prevent being
@@ -183,6 +185,53 @@ class _SessionsPageState extends State<SessionsPage> {
     // Then Resolve sessions
   }
 
+  _drawer(context) {
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          const DrawerHeader(
+            decoration: BoxDecoration(
+              color: Colors.blue,
+            ),
+            child: Text('Tiles'),
+          ),
+          ListTile(
+            title: const Text('Public key info'),
+            leading: Icon(Icons.key),
+            onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => PublicKeyInfoPage(publicKey: widget.p2pService.serverPkey, publicKeyMetadata: widget.p2pService.serverPkeyMeta)),
+            );
+              // do kool stuff
+            }
+          ), 
+          ListTile(
+            title: const Text('Settings'),
+            leading: Icon(Icons.settings),
+            onTap: () {
+              // do kool stuff
+            }
+          ), 
+          ListTile(
+            title: const Text('About'),
+            leading: Icon(Icons.info),
+            onTap: () {
+              // do kool stuff
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => AboutPage()),
+            );
+            }
+          ), 
+        ],
+      ), // ListView
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -242,7 +291,8 @@ class _SessionsPageState extends State<SessionsPage> {
         },
         tooltip: 'New session',
         child: const Icon(Icons.add, color: Colors.white),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+    ), 
+    drawer: _drawer(context),
     );
   }
 }
