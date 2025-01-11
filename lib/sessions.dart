@@ -192,9 +192,9 @@ class _SessionsPageState extends State<SessionsPage> {
         children: [
           const DrawerHeader(
             decoration: BoxDecoration(
-              color: Colors.blue,
+              color: Color(0xFFE83F6F),
             ),
-            child: Text('Tiles'),
+            child: Text(''),
           ),
           ListTile(
             title: const Text('Public key info'),

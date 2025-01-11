@@ -73,7 +73,15 @@ class PublicKeyInfoPage extends StatelessWidget {
           children: [
             _header(context),
             SizedBox(height: 10.0),
-            Text('Hello world'),
+            Text('userName: ${publicKeyMetadata.identities[0].name}'),
+            Text('userEmail: ${publicKeyMetadata.identities[0].email}'),
+            Text('algorithm: ${publicKeyMetadata.algorithm}'),
+            Text('keyId: ${publicKeyMetadata.keyId}'),
+            Text('keyIdShort: ${publicKeyMetadata.keyIdShort}'),
+            Text('keyIdNumeric: ${publicKeyMetadata.keyIdShort}'),
+            Text('isSubKey: ${publicKeyMetadata.isSubKey ? 'true' : 'false'}'),
+            Text('canSign: ${publicKeyMetadata.canSign ? 'true' : 'false'}'),
+            Text('canEncrypt: ${publicKeyMetadata.canEncrypt ? 'true' : 'false'}'),
           ],
         ),
       )

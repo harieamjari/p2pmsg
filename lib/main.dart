@@ -16,6 +16,9 @@ class P2PApp extends StatelessWidget {
       title: 'P2P over PGP messaging app',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF2274A5)),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Color(0xFFE83F6F),
+        ),
         useMaterial3: true,
       ),
       home: SetupPage(),
